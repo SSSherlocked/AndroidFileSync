@@ -1,0 +1,202 @@
+# Manual build entrypoint. Nothing runs on push; a GitHub Release is only
+# created when `create_release` is ticked in the run dialog.
+name: Build Release
+on:
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: Publish to the Releases page
+        required: true
+        type: boolean
+        default: false
+      version:
+        description: Version (leave empty to use MARKETING_VERSION from the Xcode project)
+        required: false
+        type: string
+        default: ""
+permissions:
+  contents: read
+concurrency:
+  group: manual-build-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  PROJECT_DIR: AndroidFileSync
+  APP_NAME: AndroidFileSync
+jobs:
+  macos:
+    name: macOS
+    runs-on: macos-15
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select Xcode 26 toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcode_path=$(find /Applications -maxdepth 1 -type d -name 'Xcode_26*.app' -print | sort | tail -n 1)
+          test -n "$xcode_path"
+          sudo xcode-select --switch "$xcode_path/Contents/Developer"
+          xcodebuild -version
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION#v}"
+          if [[ -z "$version" ]]; then
+            version=$(grep -m1 'MARKETING_VERSION = ' "$PROJECT_DIR/$APP_NAME.xcodeproj/project.pbxproj" \
+              | sed -E 's/.*MARKETING_VERSION = "?([^";]+)"?;.*/\1/')
+          fi
+          if [[ -z "$version" ]]; then
+            echo "::error::Could not resolve a version."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Building version $version"
+      # Signing is skipped at build time; the bundle is signed ad hoc after
+      # adb is in place and each architecture has been split out.
+      - name: Build macOS release
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "$PROJECT_DIR/$APP_NAME.xcodeproj" \
+            -scheme "$APP_NAME" \
+            -configuration Release \
+            -derivedDataPath build/DerivedData \
+            -destination 'generic/platform=macOS' \
+            ARCHS="arm64 x86_64" \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
+            build
+      - name: Locate macOS application
+        id: macos_app
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="build/DerivedData/Build/Products/Release/$APP_NAME.app"
+          if [[ ! -d "$app_path" ]]; then
+            echo "macOS .app not found."
+            exit 1
+          fi
+          echo "app_path=$app_path" >> "$GITHUB_OUTPUT"
+      - name: Bundle adb
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="${{ steps.macos_app.outputs.app_path }}"
+          target="$APP/Contents/Resources/adb"
+          if [[ ! -f "$target" ]]; then
+            cp "$PROJECT_DIR/$APP_NAME/Resources/adb" "$target"
+          fi
+          chmod +x "$target"
+          lipo -info "$target"
+      - name: Verify macOS application
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="${{ steps.macos_app.outputs.app_path }}"
+          executable="$app_path/Contents/MacOS/$APP_NAME"
+          if [[ ! -f "$executable" ]]; then
+            echo "Executable not found: $executable"
+            exit 1
+          fi
+          lipo -info "$executable"
+      # One universal app is built; Apple Silicon and Intel ship as separate,
+      # smaller packages thinned from it. ditto --arch drops the other slice
+      # from every Mach-O in the bundle (including adb), so each copy is
+      # re-signed ad hoc afterwards.
+      - name: Split macOS application by architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          APP="${{ steps.macos_app.outputs.app_path }}"
+          NAME=$(basename "$APP")
+          for pair in "arm64:AppleSilicon" "x86_64:Intel"; do
+            arch="${pair%%:*}"
+            label="${pair##*:}"
+            out="thin-$label"
+            rm -rf "$out"
+            mkdir -p "$out"
+            ditto --arch "$arch" "$APP" "$out/$NAME"
+            # Every Mach-O must keep the target slice and nothing else.
+            while IFS= read -r -d '' file; do
+              if file -b "$file" | grep -q 'Mach-O'; then
+                archs=$(lipo -archs "$file")
+                if [[ "$archs" != "$arch" ]]; then
+                  echo "::error::$file has '$archs', expected '$arch'"
+                  exit 1
+                fi
+              fi
+            done < <(find "$out/$NAME" -type f -print0)
+            codesign --force --deep --sign - "$out/$NAME"
+            codesign --verify --deep --strict "$out/$NAME"
+            lipo -info "$out/$NAME/Contents/MacOS/$APP_NAME"
+            ln -s /Applications "$out/Applications"
+            hdiutil create \
+              -volname "$APP_NAME" \
+              -srcfolder "$out" \
+              -ov -format UDZO \
+              "$APP_NAME-${VERSION}-MacOS-$label.dmg"
+          done
+      - name: Verify macOS packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          for label in AppleSilicon Intel; do
+            dmg="$APP_NAME-${VERSION}-MacOS-$label.dmg"
+            test -f "$dmg"
+            hdiutil verify "$dmg"
+            ls -lh "$dmg"
+          done
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: androidfilesync-macos
+          path: |
+            AndroidFileSync-*-MacOS-AppleSilicon.dmg
+            AndroidFileSync-*-MacOS-Intel.dmg
+          if-no-files-found: error
+          retention-days: 3
+  publish-release:
+    timeout-minutes: 15
+    name: Publish to Releases
+    if: ${{ inputs.create_release && needs.macos.result == 'success' }}
+    needs:
+      - macos
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+      - name: Show release artifacts
+        shell: bash
+        run: |
+          find artifacts -type f -print | sort
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ needs.macos.outputs.tag }}
+          name: ${{ needs.macos.outputs.tag }}
+          # The commit that was built, not whatever main is by now.
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ contains(needs.macos.outputs.version, '-') }}
+          generate_release_notes: true
+          make_latest: ${{ !contains(needs.macos.outputs.version, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/**/*.dmg
