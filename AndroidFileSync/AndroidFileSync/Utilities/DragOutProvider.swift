@@ -36,6 +36,18 @@ nonisolated enum DragOutProvider {
         let provider = NSItemProvider()
         provider.suggestedName = file.name
 
+        // In-app payload (device path) for moving onto folders or adding to the
+        // sidebar. Visible to this process only, so Finder still gets the file.
+        if let payload = try? JSONEncoder().encode(DraggedDeviceItem(path: file.path, isDirectory: file.isDirectory)) {
+            provider.registerDataRepresentation(
+                forTypeIdentifier: DraggedDeviceItem.typeIdentifier,
+                visibility: .ownProcess
+            ) { completion in
+                completion(payload, nil)
+                return nil
+            }
+        }
+
         let typeIdentifier: String
         if file.isDirectory {
             typeIdentifier = UTType.folder.identifier
@@ -109,5 +121,48 @@ nonisolated enum DragOutProvider {
                 try? fm.removeItem(at: entry)
             }
         }
+    }
+}
+
+/// A device file or folder dragged inside the app.
+nonisolated struct DraggedDeviceItem: Codable, Sendable {
+    static let typeIdentifier = "com.androidfilesync.device-item"
+    static let type = UTType(exportedAs: typeIdentifier)
+
+    let path: String
+    let isDirectory: Bool
+
+    /// Decodes every in-app item carried by a drop.
+    static func load(from providers: [NSItemProvider]) async -> [DraggedDeviceItem] {
+        var items: [DraggedDeviceItem] = []
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(typeIdentifier) {
+            let data: Data? = await withCheckedContinuation { continuation in
+                _ = provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { data, _ in
+                    continuation.resume(returning: data)
+                }
+            }
+            if let data, let item = try? JSONDecoder().decode(DraggedDeviceItem.self, from: data) {
+                items.append(item)
+            }
+        }
+        return items
+    }
+
+    /// Local file URLs carried by a drop (from Finder), skipping our own staged drag-outs.
+    static func loadFileURLs(from providers: [NSItemProvider]) async -> [URL] {
+        var urls: [URL] = []
+        for provider in providers
+        where !provider.hasItemConformingToTypeIdentifier(typeIdentifier)
+            && provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            let url: URL? = await withCheckedContinuation { continuation in
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    continuation.resume(returning: url)
+                }
+            }
+            if let url, !DragOutProvider.isStagedURL(url) {
+                urls.append(url)
+            }
+        }
+        return urls
     }
 }

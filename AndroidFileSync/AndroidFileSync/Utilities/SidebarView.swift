@@ -63,6 +63,20 @@ struct SidebarView: View {
                             toOffset: destination
                         )
                     }
+                    // Drop a folder from the browser to add it, like Finder's Favorites
+                    .onInsert(of: [DraggedDeviceItem.type]) { _, providers in
+                        Task {
+                            let folders = await DraggedDeviceItem.load(from: providers).filter(\.isDirectory)
+                            await MainActor.run {
+                                for folder in folders {
+                                    sidebarManager.addItem(
+                                        name: (folder.path as NSString).lastPathComponent,
+                                        path: folder.path
+                                    )
+                                }
+                            }
+                        }
+                    }
                 } header: {
                     Text("Quick Access")
                 }

@@ -69,6 +69,14 @@ struct FileBrowserView: View, Equatable {
     
     /// Enables dragging rows out to Finder (downloads on drop)
     var downloadManager: DownloadManager? = nil
+
+    /// List (table) or icon (grid) presentation
+    var viewMode: BrowserViewMode = .list
+
+    /// Device items dropped onto a folder: (source paths, destination folder)
+    var onMoveItems: (([String], String) -> Void)? = nil
+    /// Mac files dropped onto a folder: (local URLs, destination folder)
+    var onUploadToFolder: (([URL], String) -> Void)? = nil
     
     // Equatable — compare data that affects rendering.
     // sortVersion detects user-initiated sort changes.
@@ -76,6 +84,7 @@ struct FileBrowserView: View, Equatable {
     static func == (lhs: FileBrowserView, rhs: FileBrowserView) -> Bool {
         lhs.files.count == rhs.files.count &&
         lhs.sortVersion == rhs.sortVersion &&
+        lhs.viewMode == rhs.viewMode &&
         lhs.files.first?.id == rhs.files.first?.id &&
         lhs.files.last?.id == rhs.files.last?.id &&
         lhs.files.first?.size == rhs.files.first?.size &&
@@ -571,6 +580,8 @@ struct FileBrowserView: View, Equatable {
         ZStack {
             if files.isEmpty && !isLoading {
                 emptyFolderView
+            } else if viewMode == .icons {
+                fileGrid
             } else {
                 fileList
             }
@@ -582,25 +593,9 @@ struct FileBrowserView: View, Equatable {
         // FIX 2: Use the standard .onDrop with proper URL extraction
         .onDrop(of: [.fileURL], isTargeted: $isDraggingOver) { providers in
             Task {
-                var urls: [URL] = []
-                for provider in providers {
-                    do {
-                        let item = try await provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier)
-                        var droppedURL: URL?
-                        if let url = item as? URL {
-                            droppedURL = url
-                        } else if let data = item as? Data {
-                            droppedURL = URL(dataRepresentation: data, relativeTo: nil)
-                        }
-                        // Skip our own drag-out items dropped back onto the browser
-                        if let url = droppedURL, !DragOutProvider.isStagedURL(url) {
-                            urls.append(url)
-                        }
-                    } catch {
-                        print("⚠️ Failed to load dropped item: \(error)")
-                    }
-                }
-                
+                // In-app items dropped on empty space are ignored; loading them
+                // would trigger their lazy drag-out download for nothing.
+                let urls = await DraggedDeviceItem.loadFileURLs(from: providers)
                 if !urls.isEmpty {
                     await MainActor.run {
                         onUpload(urls)
@@ -670,6 +665,7 @@ struct FileBrowserView: View, Equatable {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
+                .folderDropTarget(file, onMoveItems: onMoveItems, onUploadURLs: onUploadToFolder)
             }
             
             TableColumn("Size", value: \.size) { file in
@@ -720,116 +716,140 @@ struct FileBrowserView: View, Equatable {
         }
         // Use contextMenu with primaryAction for double-click - this is the macOS-native approach
                 // that works with selection (macOS 13+)
-                .contextMenu(forSelectionType: String.self, menu: { selectedIds in
-                    // Context menu for selected items
-                    let selectedItems = files.filter { selectedIds.contains($0.id) }
-                    let isSingleSelection = selectedIds.count <= 1
-                    let hasOnlyFiles = !selectedItems.isEmpty && selectedItems.allSatisfy { !$0.isDirectory }
-                    
-                    if let firstItem = selectedItems.first {
-                        // Preview option (for single previewable files)
-                        if isSingleSelection && !firstItem.isDirectory && FilePreviewManager.isPreviewable(firstItem) {
-                            Button {
-                                onPreview?(firstItem)
-                            } label: {
-                                Label("Preview", systemImage: "eye")
-                            }
-                            Divider()
-                        }
-                        
-                        // Download
-                        if !firstItem.isDirectory || !isSingleSelection {
-                            Button(isSingleSelection ? "Download to Mac" : "Download Selected to Mac") {
-                                if isSingleSelection, let file = selectedItems.first, !file.isDirectory {
-                                    onDownload(file)
-                                } else {
-                                    onBatchDownload?()
-                                }
-                            }
-                            Divider()
-                        }
-                        
-                        // Folder download option
-                        if isSingleSelection && firstItem.isDirectory {
-                            Button {
-                                onDownloadFolder?(firstItem)
-                            } label: {
-                                Label("Download Folder to Mac", systemImage: "folder.badge.gearshape")
-                            }
+        .contextMenu(forSelectionType: String.self, menu: { selectedIds in
+            selectionContextMenu(selectedIds)
+        }, primaryAction: { selectedIds in
+            openPrimary(selectedIds)
+        })
+    }
 
-                            // ── Add to Sidebar ──────────────────────────────
-                            Button {
-                                onAddToSidebar?(firstItem)
-                            } label: {
-                                Label("Add to Sidebar", systemImage: "sidebar.left")
-                            }
+    private var fileGrid: some View {
+        FileGridView(
+            files: files,
+            selection: $selectedFiles,
+            thumbnailProvider: thumbnailProvider,
+            onOpen: { file in openPrimary([file.id]) },
+            dragProvider: { file in dragItemProvider(for: file) },
+            onMoveItems: onMoveItems,
+            onUploadToFolder: onUploadToFolder,
+            contextMenu: { ids in selectionContextMenu(ids) }
+        )
+    }
 
-                            Divider()
-                        }
-                        
-                        // Copy
-                        Button(isSingleSelection ? "Copy" : "Copy \(selectedIds.count) items") {
-                            let items = isSingleSelection ? [firstItem] : selectedItems
-                            onCopy?(items)
-                        }
-                        
-                        // Cut
-                        Button(isSingleSelection ? "Cut" : "Cut \(selectedIds.count) items") {
-                            let items = isSingleSelection ? [firstItem] : selectedItems
-                            onCut?(items)
-                        }
-                        
-                        Divider()
-                        
-                        // Rename - only for single selection
-                        if isSingleSelection {
-                            Button("Rename") {
-                                let kind = firstItem.isDirectory ? "Folder" : "File"
-                                if let newName = TextInputDialog.show(
-                                    title: "Rename \(kind)",
-                                    message: "Enter a new name for \"\(firstItem.name)\"",
-                                    placeholder: firstItem.name,
-                                    initialValue: firstItem.name,
-                                    confirmLabel: "Rename"
-                                ), newName != firstItem.name {
-                                    onRename?(firstItem, newName)
-                                }
-                            }
-                            .disabled(onRename == nil)
-                        }
-                        
-                        // Change Extension - only for multiple files (no folders)
-                        if selectedIds.count > 1 && hasOnlyFiles {
-                            Button("Change Extension...") {
-                                showExtensionDialog = true
-                            }
-                            .disabled(onBatchChangeExtension == nil)
-                        }
-                        
-                        // Move to Trash
-                        Button(isSingleSelection ? "Move to Trash" : "Move \(selectedIds.count) items to Trash", role: .destructive) {
-                            if isSingleSelection {
-                                fileToDelete = firstItem
-                                showDeleteConfirmation = true
-                            } else {
-                                batchDeleteCount = selectedIds.count
-                                showBatchDeleteConfirmation = true
-                            }
-                        }
+    /// Context menu for a set of selected item ids (shared by list and icon views).
+    @ViewBuilder
+    private func selectionContextMenu(_ selectedIds: Set<String>) -> some View {
+        // Context menu for selected items
+        let selectedItems = files.filter { selectedIds.contains($0.id) }
+        let isSingleSelection = selectedIds.count <= 1
+        let hasOnlyFiles = !selectedItems.isEmpty && selectedItems.allSatisfy { !$0.isDirectory }
+        
+        if let firstItem = selectedItems.first {
+            // Preview option (for single previewable files)
+            if isSingleSelection && !firstItem.isDirectory && FilePreviewManager.isPreviewable(firstItem) {
+                Button {
+                    onPreview?(firstItem)
+                } label: {
+                    Label("Preview", systemImage: "eye")
+                }
+                Divider()
+            }
+            
+            // Download
+            if !firstItem.isDirectory || !isSingleSelection {
+                Button(isSingleSelection ? "Download to Mac" : "Download Selected to Mac") {
+                    if isSingleSelection, let file = selectedItems.first, !file.isDirectory {
+                        onDownload(file)
+                    } else {
+                        onBatchDownload?()
                     }
-                }, primaryAction: { selectedIds in
-                    // Double-click action
-                    if let firstId = selectedIds.first,
-                       let file = files.first(where: { $0.id == firstId }) {
-                        if file.isDirectory {
-                            onNavigate(file.path)
-                        } else if FilePreviewManager.isPreviewable(file) {
-                            onPreview?(file)
-                        } else {
-                            onDownload(file)
-                        }
+                }
+                Divider()
+            }
+            
+            // Folder download option
+            if isSingleSelection && firstItem.isDirectory {
+                Button {
+                    onDownloadFolder?(firstItem)
+                } label: {
+                    Label("Download Folder to Mac", systemImage: "folder.badge.gearshape")
+                }
+
+                // ── Add to Sidebar ──────────────────────────────
+                Button {
+                    onAddToSidebar?(firstItem)
+                } label: {
+                    Label("Add to Sidebar", systemImage: "sidebar.left")
+                }
+
+                Divider()
+            }
+            
+            // Copy
+            Button(isSingleSelection ? "Copy" : "Copy \(selectedIds.count) items") {
+                let items = isSingleSelection ? [firstItem] : selectedItems
+                onCopy?(items)
+            }
+            
+            // Cut
+            Button(isSingleSelection ? "Cut" : "Cut \(selectedIds.count) items") {
+                let items = isSingleSelection ? [firstItem] : selectedItems
+                onCut?(items)
+            }
+            
+            Divider()
+            
+            // Rename - only for single selection
+            if isSingleSelection {
+                Button("Rename") {
+                    let kind = firstItem.isDirectory ? "Folder" : "File"
+                    if let newName = TextInputDialog.show(
+                        title: "Rename \(kind)",
+                        message: "Enter a new name for \"\(firstItem.name)\"",
+                        placeholder: firstItem.name,
+                        initialValue: firstItem.name,
+                        confirmLabel: "Rename"
+                    ), newName != firstItem.name {
+                        onRename?(firstItem, newName)
                     }
-                })
+                }
+                .disabled(onRename == nil)
+            }
+            
+            // Change Extension - only for multiple files (no folders)
+            if selectedIds.count > 1 && hasOnlyFiles {
+                Button("Change Extension...") {
+                    showExtensionDialog = true
+                }
+                .disabled(onBatchChangeExtension == nil)
+            }
+            
+            // Move to Trash
+            Button(isSingleSelection ? "Move to Trash" : "Move \(selectedIds.count) items to Trash", role: .destructive) {
+                if isSingleSelection {
+                    fileToDelete = firstItem
+                    showDeleteConfirmation = true
+                } else {
+                    batchDeleteCount = selectedIds.count
+                    showBatchDeleteConfirmation = true
+                }
+            }
+        }
+    }
+
+    /// Double-click / ⌘↓ behaviour: open folders, preview or download files.
+    private func openPrimary(_ selectedIds: Set<String>) {
+        // Double-click action
+        if let firstId = selectedIds.first,
+           let file = files.first(where: { $0.id == firstId }) {
+            if file.isDirectory {
+                onNavigate(file.path)
+            } else if FilePreviewManager.isPreviewable(file) {
+                onPreview?(file)
+            } else {
+                onDownload(file)
+            }
+        }
     }
     
     @ViewBuilder
@@ -961,42 +981,11 @@ struct FileBrowserView: View, Equatable {
     // MARK: - Helper Functions
     
     private func getFileIcon(for file: UnifiedFile) -> String {
-        if file.isDirectory {
-            switch file.name.lowercased() {
-            case "dcim", "camera": return "camera.fill"
-            case "download", "downloads": return "arrow.down.circle.fill"
-            case "pictures", "photos": return "photo.fill"
-            case "music": return "music.note"
-            case "movies", "videos": return "film.fill"
-            case "documents": return "doc.fill"
-            default: return "folder.fill"
-            }
-        }
-        
-        let ext = (file.name as NSString).pathExtension.lowercased()
-        switch ext {
-        case "jpg", "jpeg", "png", "gif", "heic", "webp": return "photo"
-        case "mp4", "mov", "avi", "mkv": return "film"
-        case "mp3", "m4a", "wav", "flac": return "music.note"
-        case "pdf": return "doc.text"
-        case "zip", "rar", "7z": return "doc.zipper"
-        case "apk": return "app.badge"
-        default: return "doc"
-        }
+        FileIcon.symbol(for: file)
     }
     
     private func getFileColor(for file: UnifiedFile) -> Color {
-        if file.isDirectory { return .blue }
-        
-        let ext = (file.name as NSString).pathExtension.lowercased()
-        switch ext {
-        case "jpg", "jpeg", "png", "gif", "heic", "webp": return .purple
-        case "mp4", "mov", "avi", "mkv": return .red
-        case "mp3", "m4a", "wav", "flac": return .pink
-        case "pdf": return .orange
-        case "apk": return .green
-        default: return .secondary
-        }
+        FileIcon.color(for: file)
     }
     
     private func dragItemProvider(for file: UnifiedFile) -> NSItemProvider? {
@@ -1005,9 +994,7 @@ struct FileBrowserView: View, Equatable {
     }
     
     private func getFileType(for file: UnifiedFile) -> String {
-        let ext = (file.name as NSString).pathExtension.lowercased()
-        if ext.isEmpty { return "File" }
-        return ext.uppercased()
+        FileIcon.kind(for: file)
     }
     
     private var dropOverlay: some View {

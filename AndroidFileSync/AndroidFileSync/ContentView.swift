@@ -35,6 +35,8 @@ struct ContentView: View {
     // Finder-style view preferences (View menu / Settings)
     @AppStorage(BrowserPreferences.showHiddenFilesKey) private var showHiddenFiles = false
     @AppStorage(BrowserPreferences.showStatusBarKey) private var showStatusBar = true
+    @AppStorage(BrowserPreferences.showPreviewPaneKey) private var showPreviewPane = false
+    @AppStorage(BrowserPreferences.viewModeKey) private var viewModeRaw = BrowserViewMode.list.rawValue
     @State private var showGoToFolder = false
     @State private var isLoading = false
     @State private var loadTask: Task<Void, Never>? = nil
@@ -436,6 +438,21 @@ struct ContentView: View {
                 }
             }
             .onChange(of: showHiddenFiles) { _ in updateDisplayedFiles() }
+            // Finder-style type-to-select in the file list / icon view
+            .background(
+                TypeSelectMonitor(isEnabled: activeAppFilter == nil) { prefix in
+                    typeSelect(prefix)
+                }
+            )
+    }
+
+    /// Selects the first displayed item whose name starts with `prefix`.
+    private func typeSelect(_ prefix: String) -> (row: Int, rowCount: Int)? {
+        guard let index = displayedFiles.firstIndex(where: {
+            $0.name.range(of: prefix, options: [.caseInsensitive, .anchored, .diacriticInsensitive]) != nil
+        }) else { return nil }
+        selectedFiles = [displayedFiles[index].id]
+        return (index, displayedFiles.count)
     }
 
     // Level 1: presentation modifiers (alerts + sheets + keyboard shortcuts)
@@ -896,7 +913,8 @@ struct ContentView: View {
                     AppBrowserView(appManager: appManager, initialFilter: appFilter, deviceName: deviceManager.deviceName, searchQuery: $searchQuery)
                         .transition(.opacity)
                 } else {
-                    // ── File Browser ──────────────────────────────────────────
+                    // ── File Browser (+ optional preview pane) ────────────────
+                    HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         FileBrowserView(
                             files: displayedFiles,
@@ -951,7 +969,10 @@ struct ContentView: View {
                             metadataTotalCount: metadataTotalCount,
                             isLoadingMoreFiles: isLoadingMoreFiles,
                             thumbnailProvider: thumbnailProvider,
-                            downloadManager: downloadManager
+                            downloadManager: downloadManager,
+                            viewMode: BrowserViewMode(rawValue: viewModeRaw) ?? .list,
+                            onMoveItems: { paths, folder in moveItems(atPaths: paths, to: folder) },
+                            onUploadToFolder: { urls, folder in handleUpload(urls: urls, to: folder) }
                         )
                         .equatable()
 
@@ -963,6 +984,13 @@ struct ContentView: View {
                                 storageStats: deviceManager.storageStats
                             )
                         }
+                    }
+
+                    if showPreviewPane {
+                        Divider()
+                        previewPane
+                            .frame(width: 260)
+                    }
                     }
                 }
 
@@ -1052,6 +1080,33 @@ struct ContentView: View {
 
     private var hasSingleFileSelection: Bool {
         activeAppFilter == nil && selectedFiles.count == 1
+    }
+
+    /// Moves items dragged onto a folder in the browser.
+    private func moveItems(atPaths paths: [String], to folder: String) {
+        let pathSet = Set(paths)
+        let items = files.filter { pathSet.contains($0.path) }
+        guard !items.isEmpty else { return }
+        selectedFiles.subtract(items.map(\.id))
+        Task {
+            do {
+                try await fileActionManager.move(items, to: folder)
+            } catch {
+                print("❌ Move failed: \(error.localizedDescription)")
+            }
+            await loadFiles()
+        }
+    }
+
+    private var previewPane: some View {
+        PreviewPaneView(
+            selectedFiles: displayedFiles.filter { selectedFiles.contains($0.id) },
+            thumbnailProvider: thumbnailProvider,
+            folderSizes: folderSizes,
+            onQuickLook: { file in filePreviewManager.previewFile(file) },
+            onDownload: { handleBatchDownload() },
+            onGetInfo: { _ in handleGetInfo() }
+        )
     }
 
     /// Finder-style Back / Forward pair.
@@ -1847,8 +1902,12 @@ struct ContentView: View {
     }
     
     private func handleUpload(urls: [URL]) {
+        handleUpload(urls: urls, to: currentPath)
+    }
+
+    /// Uploads Mac files/folders into `path` (the current folder or a drop target).
+    private func handleUpload(urls: [URL], to path: String) {
         let manager = self.uploadManager
-        let path = self.currentPath
 
         // Show immediate feedback so the user doesn't stare at a blank screen
         Task { @MainActor in

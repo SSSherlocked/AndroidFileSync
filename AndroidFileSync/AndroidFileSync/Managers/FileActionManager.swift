@@ -764,10 +764,30 @@ class FileActionManager: ObservableObject {
     /// If conflicts are found they are published to `pasteConflicts` and this method returns
     /// without copying anything. The UI should then call `resumePaste(resolution:)`.
     func paste(to destinationPath: String) async throws {
-        guard !clipboard.isEmpty else { return }
+        pasteUsesClipboard = true
+        try await performPaste(clipboard, operation: clipboardOperation, to: destinationPath)
+    }
 
-        let operation    = clipboardOperation
-        let itemsToPaste = clipboard
+    /// Moves items into a folder (drag and drop), with the same conflict handling
+    /// as paste but without touching the user's clipboard.
+    func move(_ items: [UnifiedFile], to destinationPath: String) async throws {
+        pasteUsesClipboard = false
+        try await performPaste(items, operation: .cut, to: destinationPath)
+    }
+
+    /// False while pasting items handed in directly (drag and drop), so a finished
+    /// move does not clear what the user had cut or copied.
+    private var pasteUsesClipboard = true
+
+    /// Clears the clipboard after a paste that consumed it.
+    private func finishClipboardPaste() {
+        guard pasteUsesClipboard else { return }
+        clipboard.removeAll()
+        clipboardOperation = .none
+    }
+
+    private func performPaste(_ itemsToPaste: [UnifiedFile], operation: ClipboardOperation, to destinationPath: String) async throws {
+        guard !itemsToPaste.isEmpty else { return }
 
         await MainActor.run {
             resetCancellation()
@@ -872,7 +892,7 @@ class FileActionManager: ObservableObject {
     private func executePaste(items: [(file: UnifiedFile, dest: String)],
                               operation: ClipboardOperation) async throws {
         guard !items.isEmpty else {
-            await MainActor.run { clipboard.removeAll(); clipboardOperation = .none }
+            await MainActor.run { finishClipboardPaste() }
             return
         }
 
@@ -930,7 +950,7 @@ class FileActionManager: ObservableObject {
                         isPerformingAction = false
                         currentAction = ""
                         lastError = "Cancelled after \(successCount) of \(n) items"
-                        if successCount > 0 { clipboard.removeAll(); clipboardOperation = .none }
+                        if successCount > 0 { finishClipboardPaste() }
                     }
                     return
                 }
@@ -951,7 +971,7 @@ class FileActionManager: ObservableObject {
                             isPerformingAction = false
                             currentAction = ""
                             lastError = "Cancelled after \(successCount) of \(n) items"
-                            if successCount > 0 { clipboard.removeAll(); clipboardOperation = .none }
+                            if successCount > 0 { finishClipboardPaste() }
                         }
                         return
                     }
@@ -973,7 +993,7 @@ class FileActionManager: ObservableObject {
         await MainActor.run {
             isPerformingAction = false
             currentAction      = ""
-            if successCount > 0 { clipboard.removeAll(); clipboardOperation = .none }
+            if successCount > 0 { finishClipboardPaste() }
             if !failedItems.isEmpty {
                 lastError = "Failed to paste \(failedItems.count) item(s):\n"
                     + failedItems.map { "\($0.name): \($0.error)" }.joined(separator: "\n")

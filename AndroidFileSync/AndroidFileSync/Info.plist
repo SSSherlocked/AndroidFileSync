@@ -11,5 +11,18 @@
 		<string>_adb._tcp</string>
 		<string>_afs-lnprobe._tcp</string>
 	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.androidfilesync.device-item</string>
+			<key>UTTypeDescription</key>
+			<string>AndroidFileSync device item</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
