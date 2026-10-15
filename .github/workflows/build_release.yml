@@ -85,7 +85,9 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          set -uo pipefail
+          # The runner's bash template adds -e; turn it off so a grep with no
+          # matches does not end the report early.
+          set +e -uo pipefail
           test -f xcodebuild.log || exit 0
           errors=$(grep -E '(: error: |^error: |\*\* BUILD FAILED \*\*)' xcodebuild.log | sort -u | head -n 40)
           {

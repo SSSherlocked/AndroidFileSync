@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import SwiftUI  // Array.move(fromOffsets:toOffset:)
 internal import Combine
 
 class SidebarManager: ObservableObject {
