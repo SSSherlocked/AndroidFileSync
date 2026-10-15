@@ -468,6 +468,9 @@ struct WirelessConnectView: View {
     // QR Code pairing service
     @StateObject private var qrPairingService = QRPairingService()
 
+    // macOS Local Network permission (needed for mDNS, pairing and connecting)
+    @ObservedObject private var localNetworkAccess = LocalNetworkAccess.shared
+
     // Auto-Discovery pairing state
     @StateObject private var pairingBrowser = ADBPairingBrowser()
     @State private var autoPairingCode = ""
@@ -585,6 +588,10 @@ struct WirelessConnectView: View {
         }
         .frame(width: 500, height: 660)
         .onAppear {
+            // Ask for Local Network access as soon as the window opens, so the
+            // system prompt is answered before the phone scans or is discovered.
+            localNetworkAccess.startMonitoring()
+
             // Refresh availableDevices when NWBrowser detects device changes
             let dm = deviceManager
             pairingBrowser.onDeviceListChanged = {
@@ -605,6 +612,7 @@ struct WirelessConnectView: View {
         .onDisappear {
             pairingBrowser.stopBrowsing()
             qrPairingService.stop()
+            localNetworkAccess.stopMonitoring()
         }
         .sheet(isPresented: $showSetupPopup, onDismiss: {
             if selectedTab == .autoDiscovery && pairingBrowser.status == .idle {
@@ -655,6 +663,10 @@ struct WirelessConnectView: View {
 
                 // ── Status banner ─────────────────────────────────────────────
                 qrStatusBanner(for: qrState)
+
+                if localNetworkAccess.status == .denied {
+                    localNetworkNotice
+                }
 
                 // ── QR code or result card ────────────────────────────────────
                 Group {
@@ -754,6 +766,36 @@ struct WirelessConnectView: View {
     }
 
     // MARK: QR sub-views
+
+    /// Shown while macOS blocks local network access: pairing cannot work until
+    /// the user allows it, and the flow resumes on its own once they do.
+    private var localNetworkNotice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "network.badge.shield.half.filled")
+                    .foregroundColor(.orange)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Allow Local Network access")
+                        .font(.subheadline.weight(.semibold))
+                    Text("macOS is blocking AndroidFileSync from reaching your phone. Click Allow in the system prompt, or turn AndroidFileSync on in Local Network settings. Pairing continues automatically once access is allowed — you don't need to scan again.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Button("Open Local Network Settings") {
+                localNetworkAccess.openSettings()
+            }
+            .controlSize(.small)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.orange.opacity(0.08))
+        )
+        .padding(.horizontal, 24)
+    }
 
     @ViewBuilder
     private func qrStatusBanner(for state: QRPairingState) -> some View {

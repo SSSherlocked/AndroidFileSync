@@ -38,6 +38,7 @@
 				Managers/DownloadManager.swift,
 				Managers/FileActionManager.swift,
 				Managers/FilePreviewManager.swift,
+				Managers/LocalNetworkAccess.swift,
 				Managers/OperationEngine.swift,
 				Managers/QRPairingService.swift,
 				Managers/SidebarManager.swift,
@@ -344,6 +345,7 @@
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = /opt/homebrew/include;
+				INFOPLIST_FILE = AndroidFileSync/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -393,6 +395,7 @@
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = /opt/homebrew/include;
+				INFOPLIST_FILE = AndroidFileSync/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
