@@ -50,7 +50,8 @@ struct SidebarView: View {
                             isChecking: !sidebarManager.checkedPaths.contains(item.path),
                             storageInfo: storageStats[item.path],
                             onEdit: editAction(for: item),
-                            onRemove: { sidebarManager.removeItem(item) }
+                            onRemove: { sidebarManager.removeItem(item) },
+                            onRestoreHidden: restoreHiddenAction
                         )
                         .tag(SidebarItem.folder(item.path))
                     }
@@ -61,25 +62,6 @@ struct SidebarView: View {
                             fromOffsets: source,
                             toOffset: destination
                         )
-                    }
-
-                    // Fixed row instead of a header button: the header's hover-only
-                    // collapse chevron used to push a header button around.
-                    if sidebarManager.hasHiddenBuiltIns {
-                        Button {
-                            showRestoreAlert = true
-                        } label: {
-                            SidebarRowLabel(
-                                title: "Restore Hidden Folders",
-                                systemImage: "arrow.counterclockwise",
-                                iconColor: .secondary
-                            )
-                            .foregroundColor(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Show the default folders you removed from the sidebar")
                     }
                 } header: {
                     Text("Quick Access")
@@ -163,6 +145,12 @@ struct SidebarView: View {
         }
     }
 
+    /// Context-menu action that brings back hidden default folders; nil when none are hidden.
+    private var restoreHiddenAction: (() -> Void)? {
+        guard sidebarManager.hasHiddenBuiltIns else { return nil }
+        return { showRestoreAlert = true }
+    }
+
     /// Edit handler for the row's context menu; nil for the dynamic SD card entry.
     private func editAction(for item: QuickAccessItem) -> (() -> Void)? {
         guard sidebarManager.isEditable(item) else { return nil }
@@ -181,6 +169,7 @@ struct QuickAccessRow: View {
     var storageInfo: DeviceManager.StorageInfo? = nil
     var onEdit: (() -> Void)? = nil
     var onRemove: (() -> Void)? = nil
+    var onRestoreHidden: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -240,6 +229,14 @@ struct QuickAccessRow: View {
                     onRemove?()
                 } label: {
                     Label("Remove from Sidebar", systemImage: "minus.circle")
+                }
+            }
+            if let onRestoreHidden {
+                Divider()
+                Button {
+                    onRestoreHidden()
+                } label: {
+                    Label("Restore Hidden Folders…", systemImage: "arrow.counterclockwise")
                 }
             }
         }
