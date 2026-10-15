@@ -13,8 +13,10 @@ class SidebarManager: ObservableObject {
 
     // MARK: - Published State
 
-    /// Custom items added by the user
-    @Published var customItems: [QuickAccessItem] = []
+    /// All user-visible items in sidebar order: built-ins (minus hidden) and custom
+    /// folders, as arranged and customised by the user. The SD card is not stored
+    /// here; it is injected dynamically by `visibleItems`.
+    @Published var items: [QuickAccessItem] = []
 
     /// Paths of built-in items the user has hidden
     @Published var hiddenBuiltInPaths: Set<String> = []
@@ -30,19 +32,24 @@ class SidebarManager: ObservableObject {
 
     // MARK: - Computed
 
-    /// All currently visible sidebar items (built-in - hidden + SD card if present + custom)
+    /// All currently visible sidebar items (stored order + SD card if present)
     var visibleItems: [QuickAccessItem] {
-        var builtIn = QuickAccessItem.commonFolders.filter { !hiddenBuiltInPaths.contains($0.path) }
+        var result = items
         // Insert SD card right after Internal Storage if detected
         if let sd = sdCardItem {
-            let insertIndex = builtIn.firstIndex(where: { $0.name == "Internal Storage" }).map { $0 + 1 } ?? 1
-            builtIn.insert(sd, at: min(insertIndex, builtIn.count))
+            let insertIndex = result.firstIndex(where: { $0.path == "/storage/emulated/0" }).map { $0 + 1 } ?? 1
+            result.insert(sd, at: min(insertIndex, result.count))
         }
-        return builtIn + customItems
+        return result
     }
 
     /// True when at least one built-in item is hidden (so user can restore)
     var hasHiddenBuiltIns: Bool { !hiddenBuiltInPaths.isEmpty }
+
+    /// Stored items can be renamed/recoloured; the dynamic SD card entry cannot.
+    func isEditable(_ item: QuickAccessItem) -> Bool {
+        items.contains { $0.path == item.path }
+    }
 
     // MARK: - Init
 
@@ -123,7 +130,7 @@ class SidebarManager: ObservableObject {
     func addItem(name: String, path: String, icon: String = "folder.fill", color: String = "blue") {
         guard !visibleItems.contains(where: { $0.path == path }) else { return }
         let item = QuickAccessItem(name: name, icon: icon, path: path, color: color, isBuiltIn: false)
-        customItems.append(item)
+        items.append(item)
         save()
         // Immediately check existence of the newly added item
         Task { await checkExistence() }
@@ -131,18 +138,51 @@ class SidebarManager: ObservableObject {
 
     /// Remove a sidebar item. Built-ins are hidden (restorable); custom items are deleted.
     func removeItem(_ item: QuickAccessItem) {
+        items.removeAll { $0.path == item.path }
         if item.isBuiltIn {
             hiddenBuiltInPaths.insert(item.path)
         } else {
-            customItems.removeAll { $0.id == item.id }
             existingPaths.remove(item.path)
             checkedPaths.remove(item.path)
         }
         save()
     }
 
-    /// Restore all hidden built-in items
+    /// Change an item's display name, icon and colour. The path stays the same.
+    func updateItem(path: String, name: String, icon: String, color: String) {
+        guard let index = items.firstIndex(where: { $0.path == path }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { items[index].name = trimmed }
+        items[index].icon = icon
+        items[index].color = color
+        save()
+    }
+
+    /// Reorder after a drag in the sidebar.
+    /// `displayed` is the list exactly as shown (it may omit missing folders and
+    /// include the SD card), so the move is applied to that list and the new
+    /// relative order is written back into `items`; items not shown keep their slots.
+    func move(displayed: [QuickAccessItem], fromOffsets source: IndexSet, toOffset destination: Int) {
+        var reordered = displayed
+        reordered.move(fromOffsets: source, toOffset: destination)
+
+        let storedPaths = Set(items.map(\.path))
+        var queue = reordered.filter { storedPaths.contains($0.path) }.makeIterator()
+        let shownPaths = Set(displayed.map(\.path))
+
+        items = items.map { item in
+            guard shownPaths.contains(item.path), let next = queue.next() else { return item }
+            return next
+        }
+        save()
+    }
+
+    /// Restore all hidden built-in items to their default positions
     func restoreBuiltIns() {
+        for (defaultIndex, builtIn) in QuickAccessItem.commonFolders.enumerated()
+        where hiddenBuiltInPaths.contains(builtIn.path) && !items.contains(where: { $0.path == builtIn.path }) {
+            items.insert(builtIn, at: min(defaultIndex, items.count))
+        }
         hiddenBuiltInPaths.removeAll()
         save()
         Task { await checkExistence() }
@@ -150,22 +190,34 @@ class SidebarManager: ObservableObject {
 
     // MARK: - Persistence
 
-    private let customKey  = "sidebar_customItems_v2"
+    private let itemsKey   = "sidebar_items_v3"
+    private let legacyCustomKey = "sidebar_customItems_v2"
     private let hiddenKey  = "sidebar_hiddenPaths_v2"
 
     private func save() {
-        if let data = try? JSONEncoder().encode(customItems) {
-            UserDefaults.standard.set(data, forKey: customKey)
+        if let data = try? JSONEncoder().encode(items) {
+            UserDefaults.standard.set(data, forKey: itemsKey)
         }
         UserDefaults.standard.set(Array(hiddenBuiltInPaths), forKey: hiddenKey)
     }
 
     private func load() {
-        if let data = UserDefaults.standard.data(forKey: customKey),
-           let items = try? JSONDecoder().decode([QuickAccessItem].self, from: data) {
-            customItems = items
+        let hidden = Set(UserDefaults.standard.stringArray(forKey: hiddenKey) ?? [])
+        hiddenBuiltInPaths = hidden
+
+        if let data = UserDefaults.standard.data(forKey: itemsKey),
+           let stored = try? JSONDecoder().decode([QuickAccessItem].self, from: data) {
+            items = stored
+            return
         }
-        let hidden = UserDefaults.standard.stringArray(forKey: hiddenKey) ?? []
-        hiddenBuiltInPaths = Set(hidden)
+
+        // Migrate from v2: default built-ins (minus hidden) followed by custom items.
+        var migrated = QuickAccessItem.commonFolders.filter { !hidden.contains($0.path) }
+        if let data = UserDefaults.standard.data(forKey: legacyCustomKey),
+           let custom = try? JSONDecoder().decode([QuickAccessItem].self, from: data) {
+            migrated += custom.filter { item in !migrated.contains { $0.path == item.path } }
+        }
+        items = migrated
+        save()
     }
 }

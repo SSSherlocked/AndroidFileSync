@@ -12,6 +12,7 @@ struct SidebarView: View {
     var storageStats: [String: DeviceManager.StorageInfo] = [:]
 
     @State private var showRestoreAlert = false
+    @State private var editingItem: QuickAccessItem? = nil
     
     enum SidebarItem: Hashable {
         case folder(String)
@@ -40,17 +41,23 @@ struct SidebarView: View {
 
                 // ── Quick Access ────────────────────────────────────────────────
                 Section {
-                    ForEach(sidebarManager.visibleItems.filter { item in
-                        !sidebarManager.checkedPaths.contains(item.path)
-                            || sidebarManager.existingPaths.contains(item.path)
-                    }) { item in
+                    ForEach(displayedQuickAccessItems) { item in
                         QuickAccessRow(
                             item: item,
                             isChecking: !sidebarManager.checkedPaths.contains(item.path),
                             storageInfo: storageStats[item.path],
+                            onEdit: editAction(for: item),
                             onRemove: { sidebarManager.removeItem(item) }
                         )
                         .tag(SidebarItem.folder(item.path))
+                    }
+                    // Drag to reorder, like Finder's Favorites
+                    .onMove { source, destination in
+                        sidebarManager.move(
+                            displayed: displayedQuickAccessItems,
+                            fromOffsets: source,
+                            toOffset: destination
+                        )
                     }
                 } header: {
                     HStack {
@@ -100,25 +107,13 @@ struct SidebarView: View {
                 }
             }
             .listStyle(.sidebar)
-            
-            // Subtle native footer
-            VStack(spacing: 0) {
-                Divider()
-                HStack {
-                    Spacer()
-                    FooterLink(
-                        icon: GitHubIcon(size: 13, color: .secondary),
-                        title: "GitHub",
-                        destination: URL(string: "https://github.com/Santosh7017/AndroidFileSync")!
-                    )
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color(NSColor.windowBackgroundColor).opacity(0.3))
-            }
         }
         .frame(minWidth: 200)
+        .sheet(item: $editingItem) { item in
+            SidebarItemEditor(item: item) { name, icon, color in
+                sidebarManager.updateItem(path: item.path, name: name, icon: icon, color: color)
+            }
+        }
         .alert("Restore Default Folders?", isPresented: $showRestoreAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Restore") { sidebarManager.restoreBuiltIns() }
@@ -133,6 +128,20 @@ struct SidebarView: View {
         }
     }
 
+    /// Quick Access items as shown: folders confirmed missing on the device are hidden.
+    private var displayedQuickAccessItems: [QuickAccessItem] {
+        sidebarManager.visibleItems.filter { item in
+            !sidebarManager.checkedPaths.contains(item.path)
+                || sidebarManager.existingPaths.contains(item.path)
+        }
+    }
+
+    /// Edit handler for the row's context menu; nil for the dynamic SD card entry.
+    private func editAction(for item: QuickAccessItem) -> (() -> Void)? {
+        guard sidebarManager.isEditable(item) else { return nil }
+        return { editingItem = item }
+    }
+
     // appsSection removed because it's inline in the List
 } // end SidebarView
 
@@ -143,6 +152,7 @@ struct QuickAccessRow: View {
     /// True while the ADB existence check is still in flight for this item
     let isChecking: Bool
     var storageInfo: DeviceManager.StorageInfo? = nil
+    var onEdit: (() -> Void)? = nil
     var onRemove: (() -> Void)? = nil
 
     var body: some View {
@@ -188,6 +198,14 @@ struct QuickAccessRow: View {
                 }
             }
         .contextMenu {
+            if let onEdit {
+                Button {
+                    onEdit()
+                } label: {
+                    Label("Edit…", systemImage: "pencil")
+                }
+                Divider()
+            }
             if item.isBuiltIn {
                 Button(role: .destructive) {
                     onRemove?()
@@ -211,75 +229,105 @@ struct QuickAccessRow: View {
     }
 }
 
-// MARK: - GitHub Icon Drawing
-struct GitHubIcon: View {
-    var size: CGFloat = 16
-    var color: Color = .secondary
-    
-    var body: some View {
-        Canvas { context, size in
-            context.scaleBy(x: size.width / 16, y: size.height / 16)
-            var path = Path()
-            
-            path.move(to: CGPoint(x: 8, y: 0))
-            path.addCurve(to: CGPoint(x: 16, y: 8), control1: CGPoint(x: 12.42, y: 0), control2: CGPoint(x: 16, y: 3.58))
-            path.addCurve(to: CGPoint(x: 10.55, y: 15.59), control1: CGPoint(x: 16, y: 11.54), control2: CGPoint(x: 13.71, y: 14.53))
-            path.addCurve(to: CGPoint(x: 10, y: 15.21), control1: CGPoint(x: 10.15, y: 15.67), control2: CGPoint(x: 10, y: 15.42))
-            path.addCurve(to: CGPoint(x: 10.01, y: 13.01), control1: CGPoint(x: 10, y: 14.94), control2: CGPoint(x: 10.01, y: 14.08))
-            path.addCurve(to: CGPoint(x: 9.47, y: 11.53), control1: CGPoint(x: 10.01, y: 12.26), control2: CGPoint(x: 9.76, y: 11.78))
-            path.addCurve(to: CGPoint(x: 13.12, y: 7.58), control1: CGPoint(x: 11.25, y: 11.33), control2: CGPoint(x: 13.12, y: 10.65))
-            path.addCurve(to: CGPoint(x: 12.3, y: 5.43), control1: CGPoint(x: 13.12, y: 6.7), control2: CGPoint(x: 12.81, y: 5.99))
-            path.addCurve(to: CGPoint(x: 12.38, y: 3.31), control1: CGPoint(x: 12.38, y: 5.23), control2: CGPoint(x: 12.66, y: 4.41))
-            path.addCurve(to: CGPoint(x: 10.18, y: 4.13), control1: CGPoint(x: 12.38, y: 3.31), control2: CGPoint(x: 11.71, y: 3.09))
-            path.addCurve(to: CGPoint(x: 8.18, y: 3.86), control1: CGPoint(x: 9.54, y: 3.95), control2: CGPoint(x: 8.86, y: 3.86))
-            path.addCurve(to: CGPoint(x: 6.18, y: 4.13), control1: CGPoint(x: 7.5, y: 3.86), control2: CGPoint(x: 6.82, y: 3.95))
-            path.addCurve(to: CGPoint(x: 3.98, y: 3.31), control1: CGPoint(x: 4.65, y: 3.09), control2: CGPoint(x: 3.98, y: 3.31))
-            path.addCurve(to: CGPoint(x: 4.06, y: 5.43), control1: CGPoint(x: 3.82, y: 4.41), control2: CGPoint(x: 4.1, y: 5.23))
-            path.addCurve(to: CGPoint(x: 3.24, y: 7.58), control1: CGPoint(x: 3.55, y: 5.99), control2: CGPoint(x: 3.24, y: 6.7))
-            path.addCurve(to: CGPoint(x: 6.88, y: 11.53), control1: CGPoint(x: 3.24, y: 10.65), control2: CGPoint(x: 5.1, y: 11.33))
-            path.addCurve(to: CGPoint(x: 6.37, y: 12.6), control1: CGPoint(x: 6.65, y: 11.73), control2: CGPoint(x: 6.44, y: 12.08))
-            path.addCurve(to: CGPoint(x: 4.04, y: 12.1), control1: CGPoint(x: 5.91, y: 12.81), control2: CGPoint(x: 4.76, y: 12.45))
-            path.addCurve(to: CGPoint(x: 2.81, y: 11.28), control1: CGPoint(x: 3.89, y: 11.86), control2: CGPoint(x: 3.44, y: 11.27))
-            path.addCurve(to: CGPoint(x: 1.58, y: 10.46), control1: CGPoint(x: 2.21, y: 11.04), control2: CGPoint(x: 1.76, y: 10.47))
-            path.addCurve(to: CGPoint(x: 1.59, y: 10.99), control1: CGPoint(x: 0.91, y: 10.47), control2: CGPoint(x: 1.31, y: 10.84))
-            path.addCurve(to: CGPoint(x: 2.41, y: 12.12), control1: CGPoint(x: 1.93, y: 11.18), control2: CGPoint(x: 2.32, y: 11.89))
-            path.addCurve(to: CGPoint(x: 5.1, y: 12.62), control1: CGPoint(x: 2.57, y: 12.57), control2: CGPoint(x: 3.09, y: 12.97))
-            path.addCurve(to: CGPoint(x: 5.11, y: 14.11), control1: CGPoint(x: 5.1, y: 13.28), control2: CGPoint(x: 5.11, y: 13.92))
-            path.addCurve(to: CGPoint(x: 4.56, y: 14.49), control1: CGPoint(x: 5.11, y: 14.3), control2: CGPoint(x: 4.96, y: 14.55))
-            path.addCurve(to: CGPoint(x: 0, y: 8), control1: CGPoint(x: 1.91, y: 13.74), control2: CGPoint(x: 0, y: 11.54))
-            path.addCurve(to: CGPoint(x: 8, y: 0), control1: CGPoint(x: 0, y: 3.58), control2: CGPoint(x: 3.58, y: 0))
-            path.closeSubpath()
-            
-            context.fill(path, with: .color(color))
-        }
-        .frame(width: size, height: size)
-    }
-}
+// MARK: - Item Editor
 
-// MARK: - Footer Link View
-struct FooterLink<Icon: View>: View {
-    let icon: Icon
-    let title: String
-    let destination: URL
-    @State private var isHovered = false
-    
+/// Sheet for renaming a sidebar folder and choosing its icon and colour.
+struct SidebarItemEditor: View {
+    let item: QuickAccessItem
+    let onSave: (_ name: String, _ icon: String, _ color: String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var icon: String
+    @State private var color: String
+
+    init(item: QuickAccessItem, onSave: @escaping (String, String, String) -> Void) {
+        self.item = item
+        self.onSave = onSave
+        _name = State(initialValue: item.name)
+        _icon = State(initialValue: item.icon)
+        _color = State(initialValue: item.color)
+    }
+
+    private let iconColumns = Array(repeating: GridItem(.fixed(32), spacing: 6), count: 8)
+
     var body: some View {
-        Link(destination: destination) {
-            HStack(spacing: 4) {
-                icon
-                Text(title)
-                    .font(.system(size: 11, weight: .medium))
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 22))
+                    .foregroundColor(Color(color.color))
+                    .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Edit Sidebar Item")
+                        .font(.headline)
+                    Text(item.path)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
-            .foregroundColor(isHovered ? .primary : .secondary)
-        }
-        .buttonStyle(.plain)
-        .onHover { hover in
-            isHovered = hover
-            if hover {
-                NSCursor.pointingHand.push()
-            } else {
-                NSCursor.pop()
+
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+
+            Text("Icon")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            LazyVGrid(columns: iconColumns, alignment: .leading, spacing: 6) {
+                ForEach(QuickAccessItem.iconChoices, id: \.self) { symbol in
+                    Button {
+                        icon = symbol
+                    } label: {
+                        Image(systemName: symbol)
+                            .font(.system(size: 14))
+                            .frame(width: 30, height: 30)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(icon == symbol ? Color.accentColor.opacity(0.25) : Color.clear)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .help(symbol)
+                }
+            }
+
+            Text("Color")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                ForEach(QuickAccessItem.colorChoices, id: \.self) { choice in
+                    Button {
+                        color = choice
+                    } label: {
+                        Circle()
+                            .fill(Color(choice.color))
+                            .frame(width: 18, height: 18)
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(Color.primary, lineWidth: color == choice ? 2 : 0)
+                                    .padding(-3)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .help(choice.capitalized)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    onSave(name, icon, color)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+        .padding(20)
+        .frame(width: 340)
     }
 }

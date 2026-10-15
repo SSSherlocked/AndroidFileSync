@@ -4,10 +4,10 @@ import AppKit
 struct QuickAccessItem: Identifiable, Codable {
     /// Stable ID — use the path so items survive app restarts
     var id: String { path }
-    let name: String
-    let icon: String
+    var name: String
+    var icon: String
     let path: String
-    let color: String
+    var color: String
     /// true = ships with the app (can be hidden but not deleted)
     let isBuiltIn: Bool
 
@@ -27,6 +27,20 @@ struct QuickAccessItem: Identifiable, Codable {
         QuickAccessItem(name: "Music",            icon: "music.note",            path: "/storage/emulated/0/Music",     color: "red",    isBuiltIn: true),
         QuickAccessItem(name: "Movies",           icon: "film.fill",             path: "/storage/emulated/0/Movies",    color: "cyan",   isBuiltIn: true),
         QuickAccessItem(name: "Documents",        icon: "doc.fill",              path: "/storage/emulated/0/Documents", color: "yellow", isBuiltIn: true),
+    ]
+}
+
+extension QuickAccessItem {
+    /// Colors offered in the sidebar item editor (keys understood by `String.color`).
+    static let colorChoices = ["blue", "purple", "pink", "red", "orange", "yellow", "green", "cyan", "gray"]
+
+    /// SF Symbols offered in the sidebar item editor.
+    static let iconChoices = [
+        "folder.fill", "internaldrive.fill", "sdcard.fill", "camera.fill", "photo.fill",
+        "film.fill", "music.note", "doc.fill", "arrow.down.circle.fill", "tray.full.fill",
+        "archivebox.fill", "book.fill", "star.fill", "heart.fill", "bookmark.fill",
+        "tag.fill", "briefcase.fill", "gamecontroller.fill", "bubble.left.and.bubble.right.fill",
+        "paperplane.fill", "app.badge.fill", "shippingbox.fill", "lock.fill", "cloud.fill",
     ]
 }
 

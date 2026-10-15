@@ -78,7 +78,6 @@ struct ContentView: View {
     @State private var isUSBOccupied = false
     @State private var isClaimingUSB = false
     @ObservedObject private var updateChecker = UpdateChecker.shared
-    @ObservedObject private var supportPromptManager = SupportPromptManager.shared
     @ObservedObject private var diagnosticsControl = DiagnosticsControl.shared
 
     // Get Info panel state (⌘I)
@@ -95,8 +94,6 @@ struct ContentView: View {
     @State private var showTrashConfirmation = false
     @State private var trashConfirmCount = 0
 
-
-    @State private var showReportIssuePopover = false
 
     // App browser state
     @StateObject private var appManager = AppManager()
@@ -533,19 +530,6 @@ struct ContentView: View {
             } message: {
                 Text(pasteConflictMessage)
             }
-            .alert("Is AndroidFileSync helping you?", isPresented: $supportPromptManager.shouldShowPrompt) {
-                Button("Star on GitHub") {
-                    supportPromptManager.openGitHubAndMarkDone()
-                }
-                Button("Send Feedback") {
-                    supportPromptManager.openFeedbackAndSnooze()
-                }
-                Button("Not Now", role: .cancel) {
-                    supportPromptManager.snooze()
-                }
-            } message: {
-                Text("If the app saved you time, a GitHub star helps other users find it. If something can be better, feedback is welcome too.")
-            }
             .alert("Result", isPresented: $showGlobalResultAlert) {
                 Button("OK", role: .cancel) {
                     appManager.globalResultMessage = nil
@@ -633,20 +617,6 @@ struct ContentView: View {
                     } else if type == "upload" {
                         self.activeUploadsCount = count
                     }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .afsDownloadBatchCompleted)) { notification in
-                if let completed = notification.userInfo?["completed"] as? Int,
-                   let total = notification.userInfo?["total"] as? Int {
-                    guard completed > 0, completed == total else { return }
-                    supportPromptManager.recordSuccessfulBatch()
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .afsUploadBatchCompleted)) { notification in
-                if let completed = notification.userInfo?["completed"] as? Int,
-                   let total = notification.userInfo?["total"] as? Int {
-                    guard completed > 0, completed == total else { return }
-                    supportPromptManager.recordSuccessfulBatch()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .afsUploadBatchStateChanged)) { notification in
@@ -1023,6 +993,13 @@ struct ContentView: View {
                     .disabled(activeAppFilter != nil)
                 }
 
+                // ── File actions (Finder-style) ──────────────────────────────
+                ToolbarItemGroup(placement: .automatic) {
+                    if activeAppFilter == nil {
+                        fileActionToolbarItems
+                    }
+                }
+
                 // ── Right side: Sort + Refresh + WiFi ────────────────────────
                 ToolbarItemGroup(placement: .primaryAction) {
                     // Sort menu (only in file browser)
@@ -1070,14 +1047,6 @@ struct ContentView: View {
                           : deviceManager.connectionType == .usb
                             ? "Connected via USB — tap to manage connections"
                             : "Connect via WiFi")
-
-                    Button { showReportIssuePopover = true } label: {
-                        Label("Report Issue", systemImage: "exclamationmark.bubble")
-                    }
-                    .help("Report an issue")
-                    .popover(isPresented: $showReportIssuePopover, arrowEdge: .bottom) {
-                        ReportIssuePopoverView(diagnosticsControl: diagnosticsControl)
-                    }
 
                 }
             }
@@ -1129,6 +1098,90 @@ struct ContentView: View {
             return "\"\(name)\" already exists at the destination. Replace it, keep both files, or skip?"
         }
         return "\(count) files already exist at the destination. Choose how to proceed for all of them."
+    }
+
+    // MARK: - Toolbar File Actions
+
+    /// True when the file browser is showing and at least one item is selected.
+    private var hasFileSelection: Bool {
+        activeAppFilter == nil && !selectedFiles.isEmpty
+    }
+
+    private var hasSingleFileSelection: Bool {
+        activeAppFilter == nil && selectedFiles.count == 1
+    }
+
+    @ViewBuilder
+    private var fileActionToolbarItems: some View {
+        Button { handleGlobalCopy() } label: {
+            Label("Copy", systemImage: "doc.on.doc")
+        }
+        .help("Copy (⌘C)")
+        .disabled(!hasFileSelection)
+
+        Button { handleGlobalCut() } label: {
+            Label("Cut", systemImage: "scissors")
+        }
+        .help("Cut (⌘X)")
+        .disabled(!hasFileSelection)
+
+        Button { handleGlobalPaste() } label: {
+            Label("Paste", systemImage: "doc.on.clipboard")
+        }
+        .help(fileActionManager.clipboard.isEmpty
+              ? "Paste (⌘V)"
+              : "Paste \(fileActionManager.clipboard.count) item(s) here (⌘V)")
+
+        Button { handleDeleteShortcut() } label: {
+            Label("Move to Trash", systemImage: "trash")
+        }
+        .help("Move to Trash (⌘⌫)")
+        .disabled(!hasFileSelection)
+
+        Menu {
+            Button("Rename…") { handleRenameShortcut() }
+                .disabled(!hasSingleFileSelection)
+            Button("Get Info") { handleGetInfo() }
+                .disabled(!hasSingleFileSelection)
+            Button("Quick Look") { handleQuickPreview() }
+                .disabled(!hasSingleFileSelection)
+
+            Divider()
+
+            Button("Download to Mac…") { handleBatchDownload() }
+                .disabled(!hasFileSelection)
+            Button("Upload from Mac…") { showUploadPanel() }
+
+            Divider()
+
+            Button("Select All") { selectedFiles = Set(displayedFiles.map(\.id)) }
+                .disabled(displayedFiles.isEmpty)
+            Button("Deselect All") { handleDeselectAll() }
+                .disabled(selectedFiles.isEmpty)
+
+            Divider()
+
+            Button("Delete Immediately…", role: .destructive) { handlePermanentDeleteShortcut() }
+                .disabled(!hasFileSelection)
+        } label: {
+            Label("Action", systemImage: "ellipsis.circle")
+        }
+        .help("Perform tasks with the selected items")
+    }
+
+    private func showUploadPanel() {
+        let openPanel = NSOpenPanel()
+        openPanel.canChooseFiles = true
+        openPanel.canChooseDirectories = true
+        openPanel.allowsMultipleSelection = true
+        openPanel.title = "Upload to Device"
+        openPanel.message = "Choose files or folders to upload to \(currentPath)"
+        openPanel.prompt = "Upload"
+
+        openPanel.begin { response in
+            guard response == .OK, !openPanel.urls.isEmpty else { return }
+            handleUpload(urls: openPanel.urls)
+        }
     }
 
     // MARK: - Global Actions
