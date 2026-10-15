@@ -856,6 +856,20 @@ struct ContentView: View {
                 },
                 trashCount: fileActionManager.trashedItems.count,
                 onOpenTrash: { showTrashView = true },
+                onRestoreAllTrash: {
+                    Task {
+                        try? await fileActionManager.restoreAllFromTrash()
+                        await deviceManager.fetchStorageInfo()
+                        await loadFiles()
+                    }
+                },
+                onEmptyTrash: {
+                    Task {
+                        try? await fileActionManager.emptyTrash()
+                        await deviceManager.fetchStorageInfo()
+                        await loadFiles()
+                    }
+                },
                 activeAppFilter: activeAppFilter,
                 onSelectAppFilter: { filter in
                     activeAppFilter = filter

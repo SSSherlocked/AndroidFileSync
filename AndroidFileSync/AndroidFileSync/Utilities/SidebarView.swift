@@ -7,11 +7,14 @@ struct SidebarView: View {
     let onNavigate: (String) -> Void
     var trashCount: Int = 0
     var onOpenTrash: (() -> Void)? = nil
+    var onRestoreAllTrash: (() -> Void)? = nil
+    var onEmptyTrash: (() -> Void)? = nil
     var activeAppFilter: AppFilter? = nil
     var onSelectAppFilter: ((AppFilter) -> Void)? = nil
     var storageStats: [String: DeviceManager.StorageInfo] = [:]
 
     @State private var showRestoreAlert = false
+    @State private var showEmptyTrashAlert = false
     @State private var editingItem: QuickAccessItem? = nil
     
     enum SidebarItem: Hashable {
@@ -59,21 +62,27 @@ struct SidebarView: View {
                             toOffset: destination
                         )
                     }
-                } header: {
-                    HStack {
-                        Text("Quick Access")
-                        Spacer()
-                        if sidebarManager.hasHiddenBuiltIns {
-                            Button {
-                                showRestoreAlert = true
-                            } label: {
-                                Image(systemName: "arrow.counterclockwise")
-                                    .foregroundColor(.orange)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Restore hidden default folders")
+
+                    // Fixed row instead of a header button: the header's hover-only
+                    // collapse chevron used to push a header button around.
+                    if sidebarManager.hasHiddenBuiltIns {
+                        Button {
+                            showRestoreAlert = true
+                        } label: {
+                            SidebarRowLabel(
+                                title: "Restore Hidden Folders",
+                                systemImage: "arrow.counterclockwise",
+                                iconColor: .secondary
+                            )
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .help("Show the default folders you removed from the sidebar")
                     }
+                } header: {
+                    Text("Quick Access")
                 }
                 
                 // ── Apps Section ─────────────────────────────────────────────────
@@ -104,8 +113,17 @@ struct SidebarView: View {
                                         .cornerRadius(8)
                                 }
                             }
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Open Trash") { openTrash() }
+                            Divider()
+                            Button("Restore All") { onRestoreAllTrash?() }
+                                .disabled(trashCount == 0 || onRestoreAllTrash == nil)
+                            Button("Empty Trash…", role: .destructive) { showEmptyTrashAlert = true }
+                                .disabled(trashCount == 0 || onEmptyTrash == nil)
+                        }
                     }
                 }
             }
@@ -116,6 +134,12 @@ struct SidebarView: View {
             SidebarItemEditor(item: item) { name, icon, color in
                 sidebarManager.updateItem(path: item.path, name: name, icon: icon, color: color)
             }
+        }
+        .alert("Empty Trash?", isPresented: $showEmptyTrashAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Empty Trash", role: .destructive) { onEmptyTrash?() }
+        } message: {
+            Text("All \(trashCount) items will be permanently deleted from the device. This cannot be undone.")
         }
         .alert("Restore Default Folders?", isPresented: $showRestoreAlert) {
             Button("Cancel", role: .cancel) { }
