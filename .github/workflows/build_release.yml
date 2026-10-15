@@ -65,6 +65,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Full log is kept for the error report below and the failure artifact.
           xcodebuild \
             -project "$PROJECT_DIR/$APP_NAME.xcodeproj" \
             -scheme "$APP_NAME" \
@@ -77,7 +78,46 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             MARKETING_VERSION="${{ steps.version.outputs.version }}" \
-            build
+            build 2>&1 | tee xcodebuild.log
+      # Logs need a GitHub sign-in to read; annotations and the job summary
+      # make compiler errors visible from the run page and the API.
+      - name: Report build errors
+        if: failure()
+        shell: bash
+        run: |
+          set -uo pipefail
+          test -f xcodebuild.log || exit 0
+          errors=$(grep -E '(: error: |^error: |\*\* BUILD FAILED \*\*)' xcodebuild.log | sort -u | head -n 40)
+          {
+            echo "### xcodebuild errors"
+            echo
+            echo '```'
+            printf '%s\n' "${errors:-No error lines found; see the xcodebuild-log artifact.}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$errors" | grep -E ': error: ' | while IFS= read -r line; do
+            file="${line%%:*}"
+            rest="${line#*:}"
+            lineno="${rest%%:*}"
+            message="${line#*: error: }"
+            file="${file#"$GITHUB_WORKSPACE"/}"
+            if [[ "$lineno" =~ ^[0-9]+$ ]]; then
+              echo "::error file=${file},line=${lineno}::${message}"
+            else
+              echo "::error::${line}"
+            fi
+          done
+          printf '%s\n' "$errors" | grep -E '^error: ' | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Locate macOS application
         id: macos_app
         shell: bash

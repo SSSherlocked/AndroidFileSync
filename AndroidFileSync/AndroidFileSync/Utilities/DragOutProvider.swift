@@ -13,7 +13,9 @@
 import Foundation
 import UniformTypeIdentifiers
 
-enum DragOutProvider {
+// nonisolated: the project defaults to MainActor isolation, but the file
+// representation load handler is invoked by the system on a background thread.
+nonisolated enum DragOutProvider {
 
     /// Root folder for staged drag-out downloads.
     static let stagingRoot: URL = FileManager.default.temporaryDirectory
