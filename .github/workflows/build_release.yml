@@ -110,6 +110,8 @@ jobs:
           printf '%s\n' "$errors" | grep -E '^error: ' | while IFS= read -r line; do
             echo "::error::${line}"
           done
+          # Annotations are informational; the build step already failed the job.
+          exit 0
       - name: Upload build log
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

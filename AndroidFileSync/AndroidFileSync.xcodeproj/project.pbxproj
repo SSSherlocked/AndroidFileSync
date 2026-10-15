@@ -50,6 +50,7 @@
 				Models/Models.swift,
 				Resources/adb,
 				Utilities/ConflictDialog.swift,
+				Utilities/DragOutProvider.swift,
 				Utilities/DropCoordinator.swift,
 				Utilities/FileDropDelegate.swift,
 				Utilities/FileNameHelper.swift,

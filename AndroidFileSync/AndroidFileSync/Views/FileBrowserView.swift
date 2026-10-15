@@ -672,9 +672,7 @@ struct FileBrowserView: View, Equatable {
             ForEach(files) { file in
                 // Drag rows out to Finder — the file is pulled from the device on drop
                 TableRow(file)
-                    .itemProvider {
-                        downloadManager.map { DragOutProvider.makeItemProvider(for: file, downloadManager: $0) }
-                    }
+                    .itemProvider { dragItemProvider(for: file) }
             }
         }
         .id(sortVersion) // Force Table rebuild when sort changes — SwiftUI Table won't re-order rows otherwise
@@ -979,6 +977,11 @@ struct FileBrowserView: View, Equatable {
         case "apk": return .green
         default: return .secondary
         }
+    }
+    
+    private func dragItemProvider(for file: UnifiedFile) -> NSItemProvider? {
+        guard let downloadManager else { return nil }
+        return DragOutProvider.makeItemProvider(for: file, downloadManager: downloadManager)
     }
     
     private func getFileType(for file: UnifiedFile) -> String {
