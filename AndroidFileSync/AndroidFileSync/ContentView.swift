@@ -942,113 +942,19 @@ struct ContentView: View {
             }
             .navigationTitle(deviceManager.isConnected ? "AndroidFileSync" : "")
             .navigationSubtitle(customSubtitle)
-            .toolbar {
-                // ── Left side: New Folder + New File ─────────────────────────
-                ToolbarItemGroup(placement: .automatic) {
-                    Button {
-                        if activeAppFilter == nil,
-                           let name = TextInputDialog.show(
-                            title: "New Folder",
-                            message: "Enter a name for the new folder",
-                            placeholder: "Folder name",
-                            initialValue: "New Folder",
-                            confirmLabel: "Create"
-                        ) {
-                            Task {
-                                do {
-                                    try await fileActionManager.createFolder(at: currentPath, name: name)
-                                    await loadFiles()
-                                    await deviceManager.fetchStorageInfo()
-                                } catch { print("Failed: \(error)") }
-                            }
-                        }
-                    } label: {
-                        Label("New Folder", systemImage: "folder.badge.plus")
-                    }
-                    .help("New Folder (⌘⇧N)")
-                    .keyboardShortcut("n", modifiers: [.command, .shift])
-                    .disabled(activeAppFilter != nil)
-
-                    Button {
-                        if activeAppFilter == nil,
-                           let name = TextInputDialog.show(
-                            title: "New File",
-                            message: "Enter a name for the new file",
-                            placeholder: "File name",
-                            initialValue: "untitled.txt",
-                            confirmLabel: "Create"
-                        ) {
-                            Task {
-                                do {
-                                    try await fileActionManager.createFile(at: currentPath, name: name)
-                                    await loadFiles()
-                                    await deviceManager.fetchStorageInfo()
-                                } catch { print("Failed: \(error)") }
-                            }
-                        }
-                    } label: {
-                        Label("New File", systemImage: "doc.badge.plus")
-                    }
-                    .help("New File")
-                    .disabled(activeAppFilter != nil)
-                }
-
-                // ── File actions (Finder-style) ──────────────────────────────
-                ToolbarItemGroup(placement: .automatic) {
-                    if activeAppFilter == nil {
-                        fileActionToolbarItems
-                    }
-                }
-
-                // ── Right side: Sort + Refresh + WiFi ────────────────────────
-                ToolbarItemGroup(placement: .primaryAction) {
-                    // Sort menu (only in file browser)
-                    if activeAppFilter == nil {
-                        Menu {
-                            ForEach(ActionToolbar.SortOption.allCases, id: \.self) { opt in
-                                Button {
-                                    sortFiles(by: opt, ascending: sortOption == opt ? !sortAscending : true)
-                                } label: {
-                                    if sortOption == opt {
-                                        Label(opt.rawValue, systemImage: sortAscending ? "chevron.up" : "chevron.down")
-                                    } else {
-                                        Text(opt.rawValue)
-                                    }
-                                }
-                            }
-                        } label: {
-                            Label(sortOption.rawValue, systemImage: "arrow.up.arrow.down")
-                        }
-                        .help("Sort files")
-                    }
-
-                    Button {
-                        Task { await loadFiles() }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-                    .help("Refresh (⌘R)")
-                    .keyboardShortcut("r", modifiers: .command)
-
-                    // Connection button — icon reflects current connection type
-                    Button { showWirelessConnect = true } label: {
-                        if deviceManager.connectionType == .wireless {
-                            Label("WiFi", systemImage: "wifi")
-                                .foregroundColor(.green)
-                        } else if deviceManager.connectionType == .usb {
-                            Label("USB", systemImage: "cable.connector")
-                                .foregroundColor(.primary)
-                        } else {
-                            Label("WiFi", systemImage: "wifi")
-                        }
-                    }
-                    .help(deviceManager.connectionType == .wireless
-                          ? "Manage WiFi connection"
-                          : deviceManager.connectionType == .usb
-                            ? "Connected via USB — tap to manage connections"
-                            : "Connect via WiFi")
-
-                }
+            // Customizable toolbar: ⌘-drag to rearrange, right-click → Customize Toolbar…
+            // (macOS persists the layout under the toolbar id).
+            .toolbar(id: "main") {
+                ToolbarItem(id: "newFolder") { newFolderButton }
+                ToolbarItem(id: "newFile") { newFileButton }
+                ToolbarItem(id: "copy") { copyButton }
+                ToolbarItem(id: "cut") { cutButton }
+                ToolbarItem(id: "paste") { pasteButton }
+                ToolbarItem(id: "trash") { trashButton }
+                ToolbarItem(id: "action") { actionMenu }
+                ToolbarItem(id: "sort") { sortMenu }
+                ToolbarItem(id: "refresh") { refreshButton }
+                ToolbarItem(id: "connection") { connectionButton }
             }
             .searchable(text: $searchQuery, placement: .toolbar, prompt: activeAppFilter != nil ? "Search apps..." : "Search files...")
             }
@@ -1111,33 +1017,92 @@ struct ContentView: View {
         activeAppFilter == nil && selectedFiles.count == 1
     }
 
-    @ViewBuilder
-    private var fileActionToolbarItems: some View {
+    private var newFolderButton: some View {
+        Button {
+            if activeAppFilter == nil,
+               let name = TextInputDialog.show(
+                title: "New Folder",
+                message: "Enter a name for the new folder",
+                placeholder: "Folder name",
+                initialValue: "New Folder",
+                confirmLabel: "Create"
+            ) {
+                Task {
+                    do {
+                        try await fileActionManager.createFolder(at: currentPath, name: name)
+                        await loadFiles()
+                        await deviceManager.fetchStorageInfo()
+                    } catch { print("Failed: \(error)") }
+                }
+            }
+        } label: {
+            Label("New Folder", systemImage: "folder.badge.plus")
+        }
+        .help("New Folder (⌘⇧N)")
+        .keyboardShortcut("n", modifiers: [.command, .shift])
+        .disabled(activeAppFilter != nil)
+    }
+
+    private var newFileButton: some View {
+        Button {
+            if activeAppFilter == nil,
+               let name = TextInputDialog.show(
+                title: "New File",
+                message: "Enter a name for the new file",
+                placeholder: "File name",
+                initialValue: "untitled.txt",
+                confirmLabel: "Create"
+            ) {
+                Task {
+                    do {
+                        try await fileActionManager.createFile(at: currentPath, name: name)
+                        await loadFiles()
+                        await deviceManager.fetchStorageInfo()
+                    } catch { print("Failed: \(error)") }
+                }
+            }
+        } label: {
+            Label("New File", systemImage: "doc.badge.plus")
+        }
+        .help("New File")
+        .disabled(activeAppFilter != nil)
+    }
+
+    private var copyButton: some View {
         Button { handleGlobalCopy() } label: {
             Label("Copy", systemImage: "doc.on.doc")
         }
         .help("Copy (⌘C)")
         .disabled(!hasFileSelection)
+    }
 
+    private var cutButton: some View {
         Button { handleGlobalCut() } label: {
             Label("Cut", systemImage: "scissors")
         }
         .help("Cut (⌘X)")
         .disabled(!hasFileSelection)
+    }
 
+    private var pasteButton: some View {
         Button { handleGlobalPaste() } label: {
             Label("Paste", systemImage: "doc.on.clipboard")
         }
         .help(fileActionManager.clipboard.isEmpty
               ? "Paste (⌘V)"
               : "Paste \(fileActionManager.clipboard.count) item(s) here (⌘V)")
+        .disabled(activeAppFilter != nil)
+    }
 
+    private var trashButton: some View {
         Button { handleDeleteShortcut() } label: {
             Label("Move to Trash", systemImage: "trash")
         }
         .help("Move to Trash (⌘⌫)")
         .disabled(!hasFileSelection)
+    }
 
+    private var actionMenu: some View {
         Menu {
             Button("Rename…") { handleRenameShortcut() }
                 .disabled(!hasSingleFileSelection)
@@ -1167,6 +1132,57 @@ struct ContentView: View {
             Label("Action", systemImage: "ellipsis.circle")
         }
         .help("Perform tasks with the selected items")
+        .disabled(activeAppFilter != nil)
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            ForEach(ActionToolbar.SortOption.allCases, id: \.self) { opt in
+                Button {
+                    sortFiles(by: opt, ascending: sortOption == opt ? !sortAscending : true)
+                } label: {
+                    if sortOption == opt {
+                        Label(opt.rawValue, systemImage: sortAscending ? "chevron.up" : "chevron.down")
+                    } else {
+                        Text(opt.rawValue)
+                    }
+                }
+            }
+        } label: {
+            Label("Sort", systemImage: "arrow.up.arrow.down")
+        }
+        .help("Sort files (\(sortOption.rawValue))")
+        .disabled(activeAppFilter != nil)
+    }
+
+    private var refreshButton: some View {
+        Button {
+            Task { await loadFiles() }
+        } label: {
+            Label("Refresh", systemImage: "arrow.clockwise")
+        }
+        .help("Refresh (⌘R)")
+        .keyboardShortcut("r", modifiers: .command)
+    }
+
+    /// Icon reflects the current connection type.
+    private var connectionButton: some View {
+        Button { showWirelessConnect = true } label: {
+            if deviceManager.connectionType == .wireless {
+                Label("WiFi", systemImage: "wifi")
+                    .foregroundColor(.green)
+            } else if deviceManager.connectionType == .usb {
+                Label("USB", systemImage: "cable.connector")
+                    .foregroundColor(.primary)
+            } else {
+                Label("WiFi", systemImage: "wifi")
+            }
+        }
+        .help(deviceManager.connectionType == .wireless
+              ? "Manage WiFi connection"
+              : deviceManager.connectionType == .usb
+                ? "Connected via USB — tap to manage connections"
+                : "Connect via WiFi")
     }
 
     private func showUploadPanel() {

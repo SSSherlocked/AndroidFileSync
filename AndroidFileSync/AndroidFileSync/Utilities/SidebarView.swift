@@ -79,7 +79,7 @@ struct SidebarView: View {
                 // ── Apps Section ─────────────────────────────────────────────────
                 if onSelectAppFilter != nil {
                     Section("Apps") {
-                        Label("Apps", systemImage: "square.grid.2x2.fill")
+                        SidebarRowLabel(title: "Apps", systemImage: "square.grid.2x2.fill", iconColor: .accentColor)
                             .tag(SidebarItem.apps)
                     }
                 }
@@ -88,8 +88,11 @@ struct SidebarView: View {
                     Section("Trash") {
                         Button(action: openTrash) {
                             HStack {
-                                Label("Trash", systemImage: trashCount > 0 ? "trash.fill" : "trash")
-                                    .foregroundColor(trashCount > 0 ? .red : .primary)
+                                SidebarRowLabel(
+                                    title: "Trash",
+                                    systemImage: trashCount > 0 ? "trash.fill" : "trash",
+                                    iconColor: trashCount > 0 ? .red : .secondary
+                                )
                                 Spacer()
                                 if trashCount > 0 {
                                     Text("\(trashCount)")
@@ -157,14 +160,10 @@ struct QuickAccessRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Image(systemName: item.icon)
-                    .foregroundColor(Color(item.color.color))
+            HStack(spacing: 0) {
+                SidebarRowLabel(title: item.name, systemImage: item.icon, iconColor: Color(item.color.color))
 
-                Text(item.name)
-                    .lineLimit(1)
-
-                Spacer()
+                Spacer(minLength: 4)
 
                 if isChecking {
                     ProgressView()
@@ -188,12 +187,12 @@ struct QuickAccessRow: View {
                             }
                         }
                         .frame(height: 3)
-                        .padding(.leading, 30)
+                        .padding(.leading, SidebarRowLabel.textInset)
 
                         Text(storage.usedText)
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
-                            .padding(.leading, 30)
+                            .padding(.leading, SidebarRowLabel.textInset)
                     }
                 }
             }
@@ -226,6 +225,31 @@ struct QuickAccessRow: View {
         if fraction > 0.9 { return .red }
         if fraction > 0.8 { return .orange }
         return .blue
+    }
+}
+
+// MARK: - Row Label
+
+/// Icon + title with a fixed-width icon column, so every sidebar title starts
+/// at the same x position regardless of the SF Symbol's natural width.
+struct SidebarRowLabel: View {
+    static let iconWidth: CGFloat = 20
+    static let spacing: CGFloat = 6
+    /// Leading offset of the title, for content laid out under it (e.g. storage bar).
+    static let textInset: CGFloat = iconWidth + spacing
+
+    let title: String
+    let systemImage: String
+    var iconColor: Color = .accentColor
+
+    var body: some View {
+        HStack(spacing: Self.spacing) {
+            Image(systemName: systemImage)
+                .foregroundColor(iconColor)
+                .frame(width: Self.iconWidth, alignment: .center)
+            Text(title)
+                .lineLimit(1)
+        }
     }
 }
 
