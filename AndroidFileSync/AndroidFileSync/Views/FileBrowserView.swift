@@ -67,6 +67,9 @@ struct FileBrowserView: View, Equatable {
     // Thumbnail provider for inline file thumbnails
     var thumbnailProvider: ThumbnailProvider? = nil
     
+    /// Enables dragging rows out to Finder (downloads on drop)
+    var downloadManager: DownloadManager? = nil
+    
     // Equatable — compare data that affects rendering.
     // sortVersion detects user-initiated sort changes.
     // File boundary checks detect metadata enrichment and navigation changes.
@@ -563,10 +566,14 @@ struct FileBrowserView: View, Equatable {
                 for provider in providers {
                     do {
                         let item = try await provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier)
+                        var droppedURL: URL?
                         if let url = item as? URL {
-                            urls.append(url)
-                        } else if let data = item as? Data,
-                                  let url = URL(dataRepresentation: data, relativeTo: nil) {
+                            droppedURL = url
+                        } else if let data = item as? Data {
+                            droppedURL = URL(dataRepresentation: data, relativeTo: nil)
+                        }
+                        // Skip our own drag-out items dropped back onto the browser
+                        if let url = droppedURL, !DragOutProvider.isStagedURL(url) {
                             urls.append(url)
                         }
                     } catch {
@@ -623,7 +630,7 @@ struct FileBrowserView: View, Equatable {
     }()
 
     private var fileList: some View {
-        Table(files, selection: $selectedFiles, sortOrder: $sortOrder) {
+        Table(of: UnifiedFile.self, selection: $selectedFiles, sortOrder: $sortOrder) {
             TableColumn("Name", value: \.name) { file in
                 HStack(spacing: 8) {
                     if let provider = thumbnailProvider {
@@ -661,6 +668,14 @@ struct FileBrowserView: View, Equatable {
                     .foregroundColor(.secondary)
             }
             // No .width() — fills remaining space, eliminates trailing column separator
+        } rows: {
+            ForEach(files) { file in
+                // Drag rows out to Finder — the file is pulled from the device on drop
+                TableRow(file)
+                    .itemProvider {
+                        downloadManager.map { DragOutProvider.makeItemProvider(for: file, downloadManager: $0) }
+                    }
+            }
         }
         .id(sortVersion) // Force Table rebuild when sort changes — SwiftUI Table won't re-order rows otherwise
         .tableStyle(.inset)

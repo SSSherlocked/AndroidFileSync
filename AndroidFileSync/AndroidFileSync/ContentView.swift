@@ -957,7 +957,8 @@ struct ContentView: View {
                             metadataLoadedCount: metadataLoadedCount,
                             metadataTotalCount: metadataTotalCount,
                             isLoadingMoreFiles: isLoadingMoreFiles,
-                            thumbnailProvider: thumbnailProvider
+                            thumbnailProvider: thumbnailProvider,
+                            downloadManager: downloadManager
                         )
                         .equatable()
                     }
