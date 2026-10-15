@@ -31,6 +31,11 @@ struct ContentView: View {
     @State private var currentPath = "/sdcard"
     @State private var pathHistory: [String] = []
     @State private var forwardHistory: [String] = []
+
+    // Finder-style view preferences (View menu / Settings)
+    @AppStorage(BrowserPreferences.showHiddenFilesKey) private var showHiddenFiles = false
+    @AppStorage(BrowserPreferences.showStatusBarKey) private var showStatusBar = true
+    @State private var showGoToFolder = false
     @State private var isLoading = false
     @State private var loadTask: Task<Void, Never>? = nil
     @State private var folderSizes: [String: UInt64] = [:]
@@ -122,6 +127,11 @@ struct ContentView: View {
             result = result.filter { !activeDeletingPaths.contains($0.path) }
         }
         
+        // Hide dot files unless View › Show Hidden Files is on (Finder default)
+        if !showHiddenFiles {
+            result = result.filter { !$0.name.hasPrefix(".") }
+        }
+
         // Apply search filter
         if !searchQuery.isEmpty {
             result = result.filter { $0.name.localizedCaseInsensitiveContains(searchQuery) }
@@ -417,6 +427,15 @@ struct ContentView: View {
 
     var body: some View {
         contentWithPresentations
+            // Menu bar commands (File / View / Go) act on this window's browser.
+            .focusedSceneValue(\.browserActions, browserActions)
+            .sheet(isPresented: $showGoToFolder) {
+                GoToFolderView(currentPath: currentPath) { path in
+                    activeAppFilter = nil
+                    navigateTo(path)
+                }
+            }
+            .onChange(of: showHiddenFiles) { _ in updateDisplayedFiles() }
     }
 
     // Level 1: presentation modifiers (alerts + sheets + keyboard shortcuts)
@@ -447,20 +466,10 @@ struct ContentView: View {
                     Button("") { handleGlobalCut() }.keyboardShortcut("x", modifiers: .command)
                     Button("") { handleGlobalPaste() }.keyboardShortcut("v", modifiers: .command)
                     
-                    // ── Delete shortcuts (moved here for reliability) ─────
-                    Button("") { handleDeleteShortcut() }.keyboardShortcut(.delete, modifiers: .command)
-                    Button("") { handlePermanentDeleteShortcut() }.keyboardShortcut(.delete, modifiers: [.command, .option])
+                    // Trash, delete, navigation, Get Info and Rename shortcuts
+                    // live in the menu bar (BrowserCommands).
 
-                    // ── Finder-style navigation ───────────────────────────
-                    Button("") { handleDeselectAll() }.keyboardShortcut("a", modifiers: [.command, .shift])
-                    Button("") { handleNavigateUp() }.keyboardShortcut(.upArrow, modifiers: .command)
-                    Button("") { handleOpenSelected() }.keyboardShortcut(.downArrow, modifiers: .command)
-                    Button("") { navigateBack() }.keyboardShortcut("[", modifiers: .command)
-                    Button("") { navigateForward() }.keyboardShortcut("]", modifiers: .command)
-
-                    // ── File actions ──────────────────────────────────────
-                    Button("") { handleGetInfo() }.keyboardShortcut("i", modifiers: .command)
-                    Button("") { handleRenameShortcut() }.keyboardShortcut("r", modifiers: [.command, .shift])
+                    // ── Quick Look ────────────────────────────────────────
                     Button("") { handleQuickPreview() }.keyboardShortcut(.space, modifiers: [])
                     Button("") {
                         if filePreviewManager.showPreviewPanel {
@@ -945,6 +954,15 @@ struct ContentView: View {
                             downloadManager: downloadManager
                         )
                         .equatable()
+
+                        if showStatusBar {
+                            StatusBarView(
+                                itemCount: displayedFiles.count,
+                                selectedCount: selectedFiles.count,
+                                currentPath: currentPath,
+                                storageStats: deviceManager.storageStats
+                            )
+                        }
                     }
                 }
 
@@ -959,12 +977,17 @@ struct ContentView: View {
             // Customizable toolbar: ⌘-drag to rearrange, right-click → Customize Toolbar…
             // (macOS persists the layout under the toolbar id).
             .toolbar(id: "main") {
+                ToolbarItem(id: "navigation", placement: .navigation) { navigationButtons }
                 ToolbarItem(id: "newFolder") { newFolderButton }
                 ToolbarItem(id: "newFile") { newFileButton }
-                ToolbarItem(id: "copy") { copyButton }
-                ToolbarItem(id: "cut") { cutButton }
-                ToolbarItem(id: "paste") { pasteButton }
-                ToolbarItem(id: "trash") { trashButton }
+                // Grouped only to stay within the toolbar builder's 10-item limit;
+                // each item is still placed and customized on its own.
+                Group {
+                    ToolbarItem(id: "copy") { copyButton }
+                    ToolbarItem(id: "cut") { cutButton }
+                    ToolbarItem(id: "paste") { pasteButton }
+                    ToolbarItem(id: "trash") { trashButton }
+                }
                 ToolbarItem(id: "action") { actionMenu }
                 ToolbarItem(id: "sort") { sortMenu }
                 ToolbarItem(id: "refresh") { refreshButton }
@@ -1031,51 +1054,105 @@ struct ContentView: View {
         activeAppFilter == nil && selectedFiles.count == 1
     }
 
-    private var newFolderButton: some View {
-        Button {
-            if activeAppFilter == nil,
-               let name = TextInputDialog.show(
+    /// Finder-style Back / Forward pair.
+    private var navigationButtons: some View {
+        ControlGroup {
+            Button(action: navigateBack) {
+                Label("Back", systemImage: "chevron.left")
+            }
+            .help("Back (⌘[)")
+            .disabled(pathHistory.isEmpty || activeAppFilter != nil)
+
+            Button(action: navigateForward) {
+                Label("Forward", systemImage: "chevron.right")
+            }
+            .help("Forward (⌘])")
+            .disabled(forwardHistory.isEmpty || activeAppFilter != nil)
+        }
+    }
+
+    /// Actions exposed to the menu bar (see BrowserCommands).
+    private var browserActions: BrowserActions {
+        let parent = (currentPath as NSString).deletingLastPathComponent
+        return BrowserActions(
+            isFileBrowser: activeAppFilter == nil,
+            hasSelection: hasFileSelection,
+            hasSingleSelection: hasSingleFileSelection,
+            canGoBack: activeAppFilter == nil && !pathHistory.isEmpty,
+            canGoForward: activeAppFilter == nil && !forwardHistory.isEmpty,
+            canGoUp: activeAppFilter == nil && !parent.isEmpty && parent != currentPath,
+            newFolder: { createNewFolder() },
+            newFile: { createNewFile() },
+            openSelection: { handleOpenSelected() },
+            quickLook: { handleQuickPreview() },
+            getInfo: { handleGetInfo() },
+            rename: { handleRenameShortcut() },
+            download: { handleBatchDownload() },
+            upload: { showUploadPanel() },
+            moveToTrash: { handleDeleteShortcut() },
+            deleteImmediately: { handlePermanentDeleteShortcut() },
+            deselectAll: { handleDeselectAll() },
+            refresh: { Task { await loadFiles() } },
+            goBack: { navigateBack() },
+            goForward: { navigateForward() },
+            goUp: { handleNavigateUp() },
+            goToFolder: { showGoToFolder = true },
+            goToPath: { path in
+                activeAppFilter = nil
+                navigateTo(path)
+            },
+            sort: { option in
+                sortFiles(by: option, ascending: sortOption == option ? !sortAscending : true)
+            }
+        )
+    }
+
+    private func createNewFolder() {
+        guard activeAppFilter == nil,
+              let name = TextInputDialog.show(
                 title: "New Folder",
                 message: "Enter a name for the new folder",
                 placeholder: "Folder name",
                 initialValue: "New Folder",
                 confirmLabel: "Create"
-            ) {
-                Task {
-                    do {
-                        try await fileActionManager.createFolder(at: currentPath, name: name)
-                        await loadFiles()
-                        await deviceManager.fetchStorageInfo()
-                    } catch { print("Failed: \(error)") }
-                }
-            }
-        } label: {
-            Label("New Folder", systemImage: "folder.badge.plus")
+              ) else { return }
+        Task {
+            do {
+                try await fileActionManager.createFolder(at: currentPath, name: name)
+                await loadFiles()
+                await deviceManager.fetchStorageInfo()
+            } catch { print("Failed: \(error)") }
         }
-        .help("New Folder (⌘⇧N)")
-        .keyboardShortcut("n", modifiers: [.command, .shift])
-        .disabled(activeAppFilter != nil)
     }
 
-    private var newFileButton: some View {
-        Button {
-            if activeAppFilter == nil,
-               let name = TextInputDialog.show(
+    private func createNewFile() {
+        guard activeAppFilter == nil,
+              let name = TextInputDialog.show(
                 title: "New File",
                 message: "Enter a name for the new file",
                 placeholder: "File name",
                 initialValue: "untitled.txt",
                 confirmLabel: "Create"
-            ) {
-                Task {
-                    do {
-                        try await fileActionManager.createFile(at: currentPath, name: name)
-                        await loadFiles()
-                        await deviceManager.fetchStorageInfo()
-                    } catch { print("Failed: \(error)") }
-                }
-            }
-        } label: {
+              ) else { return }
+        Task {
+            do {
+                try await fileActionManager.createFile(at: currentPath, name: name)
+                await loadFiles()
+                await deviceManager.fetchStorageInfo()
+            } catch { print("Failed: \(error)") }
+        }
+    }
+
+    private var newFolderButton: some View {
+        Button(action: createNewFolder) {
+            Label("New Folder", systemImage: "folder.badge.plus")
+        }
+        .help("New Folder (⌘⇧N)")
+        .disabled(activeAppFilter != nil)
+    }
+
+    private var newFileButton: some View {
+        Button(action: createNewFile) {
             Label("New File", systemImage: "doc.badge.plus")
         }
         .help("New File")
@@ -1176,7 +1253,6 @@ struct ContentView: View {
             Label("Refresh", systemImage: "arrow.clockwise")
         }
         .help("Refresh (⌘R)")
-        .keyboardShortcut("r", modifiers: .command)
     }
 
     /// Icon reflects the current connection type.

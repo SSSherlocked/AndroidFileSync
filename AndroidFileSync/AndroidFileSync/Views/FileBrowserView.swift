@@ -202,19 +202,7 @@ struct FileBrowserView: View, Equatable {
     
     private var pathBar: some View {
         HStack(spacing: 0) {
-            // Back button
-            if canGoBack {
-                Button(action: onGoBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .frame(width: 30, height: 30)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Go back")
-            }
-            
+            // Back/Forward live in the window toolbar; the path is clickable.
             // Breadcrumb path
             breadcrumbPath
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
@@ -225,7 +213,7 @@ struct FileBrowserView: View, Equatable {
                 inlineActionStatus
             }
             
-            // Item count
+            // Loading progress (the item count lives in the status bar)
             if isLoading {
                 ProgressView().controlSize(.small)
             } else if isLoadingMoreFiles {
@@ -244,11 +232,6 @@ struct FileBrowserView: View, Equatable {
                         .foregroundColor(.secondary)
                 }
                 .help("Loading file details...")
-            } else {
-                Text(files.count == 1 ? "1 item" : "\(files.count) items")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-                    .fixedSize()
             }
             
             Divider().frame(height: 16).padding(.horizontal, 10)
@@ -272,70 +255,107 @@ struct FileBrowserView: View, Equatable {
     }
     
     // Breadcrumb segments built from current path
-    private var breadcrumbPath: some View {
-        let allSegments = displayPathSegments
-        // For deep paths, collapse middle segments: first > … > parent > current
-        let segments: [(text: String, isCollapsed: Bool)]
-        if allSegments.count > 3 {
-            segments = [
-                (allSegments[0], false),
-                ("…", true),
-                (allSegments[allSegments.count - 2], false),
-                (allSegments[allSegments.count - 1], false)
-            ]
-        } else {
-            segments = allSegments.map { ($0, false) }
+    /// One clickable breadcrumb: display title + the device path it opens.
+    private struct PathCrumb: Hashable {
+        let title: String
+        let path: String
+    }
+
+    /// Breadcrumbs for the current path; storage roots get friendly names.
+    private var pathCrumbs: [PathCrumb] {
+        let parts = currentPath.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        var crumbs: [PathCrumb] = []
+        var accumulated = ""
+        var index = 0
+
+        if parts.starts(with: ["storage", "emulated", "0"]) {
+            accumulated = "/storage/emulated/0"
+            crumbs.append(PathCrumb(title: "Internal Storage", path: accumulated))
+            index = 3
+        } else if parts.count >= 2, parts[0] == "storage", parts[1] != "emulated", parts[1] != "self" {
+            accumulated = "/storage/" + parts[1]
+            crumbs.append(PathCrumb(title: "SD Card", path: accumulated))
+            index = 2
         }
-        
+
+        while index < parts.count {
+            accumulated += "/" + parts[index]
+            crumbs.append(PathCrumb(title: parts[index], path: accumulated))
+            index += 1
+        }
+        return crumbs
+    }
+
+    private var breadcrumbPath: some View {
+        let crumbs = pathCrumbs
+        // Deep paths collapse the middle into a menu: first › … › parent › current
+        let collapsed: [PathCrumb] = crumbs.count > 4 ? Array(crumbs[1..<(crumbs.count - 2)]) : []
+        let visible: [PathCrumb] = crumbs.count > 4
+            ? [crumbs[0], crumbs[crumbs.count - 2], crumbs[crumbs.count - 1]]
+            : crumbs
+
         return HStack(spacing: 2) {
-            if segments.isEmpty {
+            if crumbs.isEmpty {
                 Text("/")
                     .font(.system(size: 14))
                     .foregroundColor(.secondary)
             }
-            
-            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+
+            ForEach(Array(visible.enumerated()), id: \.element) { index, crumb in
                 if index > 0 {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(Color(NSColor.tertiaryLabelColor))
+                    breadcrumbSeparator
                 }
-                if segment.isCollapsed {
-                    Text(segment.text)
-                        .font(.system(size: 14))
-                        .foregroundColor(Color(NSColor.tertiaryLabelColor))
-                } else if index == segments.count - 1 {
-                    // Last segment (current folder) — never truncate
-                    Text(segment.text)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                } else {
-                    // Intermediate segments — allow truncation
-                    Text(segment.text)
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(minWidth: 20, alignment: .leading)
+                if index == 1, !collapsed.isEmpty {
+                    Menu {
+                        ForEach(collapsed, id: \.self) { hidden in
+                            Button(hidden.title) { onNavigate(hidden.path) }
+                        }
+                    } label: {
+                        Text("…")
+                            .font(.system(size: 14))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Show enclosing folders")
+                    breadcrumbSeparator
                 }
+                breadcrumbButton(crumb, isCurrent: index == visible.count - 1)
             }
         }
     }
 
-    private var displayPathSegments: [String] {
-        let segments = currentPath
-            .split(separator: "/", omittingEmptySubsequences: true)
-            .map(String.init)
-
-        let internalStoragePrefix = ["storage", "emulated", "0"]
-        if segments.starts(with: internalStoragePrefix) {
-            return Array(segments.dropFirst(internalStoragePrefix.count))
-        }
-
-        return segments
+    private var breadcrumbSeparator: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundColor(Color(NSColor.tertiaryLabelColor))
     }
+
+    @ViewBuilder
+    private func breadcrumbButton(_ crumb: PathCrumb, isCurrent: Bool) -> some View {
+        if isCurrent {
+            // Current folder — never truncate
+            Text(crumb.title)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        } else {
+            Button {
+                onNavigate(crumb.path)
+            } label: {
+                Text(crumb.title)
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(minWidth: 20, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .help(crumb.path)
+        }
+    }
+
     
     @ViewBuilder
     private var statusIndicator: some View {

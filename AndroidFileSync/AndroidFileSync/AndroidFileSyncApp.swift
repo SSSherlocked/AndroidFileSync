@@ -35,6 +35,13 @@ struct AndroidFileSyncApp: App {
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified(showsTitle: true))
         .windowStyle(.titleBar)
+        .commands {
+            BrowserCommands()
+        }
+
+        Settings {
+            SettingsView()
+        }
     }
 }
 
