@@ -115,23 +115,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let adbPath = ADBManager.getADBPath()
         guard !adbPath.isEmpty else { return }
 
-        // Default behavior: ensure phone does not stay "wireless debugging connected"
-        // after app exit for single-app users.
-        // Advanced/shared-ADB users can opt out via UserDefaults flag.
+        // Every command here is time-boxed: quitting must never hang on adb
+        // (a server that is starting up, or a wireless device that went away).
+        if !Shell.useDefaultServer {
+            // The app owns this server: killing it drops every connection it holds,
+            // including wireless ones, and stops it outliving the UI with a stale
+            // network route (EHOSTUNREACH on the next launch).
+            Shell.runBounded(adbPath, args: ["kill-server"], timeout: 2.0)
+            return
+        }
+
+        // Shared server (e.g. Android Studio on port 5037): never kill it. By default
+        // make sure the phone does not stay "wireless debugging connected" after the
+        // app exits; shared-ADB users can opt out via the disconnectAllWirelessOnQuit flag.
         let disconnectAllOnQuit = UserDefaults.standard.object(forKey: "disconnectAllWirelessOnQuit") as? Bool ?? true
         if disconnectAllOnQuit {
-            _ = Shell.run(adbPath, args: ["disconnect"])
+            Shell.runBounded(adbPath, args: ["disconnect"], timeout: 2.0)
         } else {
             ADBManager.disconnectAppManagedWirelessSync()
         }
-
-        // The app-owned server can otherwise outlive the UI process with a stale
-        // network route, making a reachable paired phone fail with EHOSTUNREACH on
-        // the next launch. Never kill the shared Android Studio server on port 5037.
-        if !Shell.useDefaultServer {
-            _ = Shell.run(adbPath, args: ["kill-server"])
-        }
-
     }
 
     private func installDeleteShortcutMonitor() {

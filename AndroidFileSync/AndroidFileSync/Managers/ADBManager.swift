@@ -3269,8 +3269,9 @@ class ADBManager {
             targets.insert(active)
         }
 
+        // Bounded: this runs while the app quits, on the main thread.
         for target in targets {
-            _ = Shell.run(adbPath, args: ["disconnect", target])
+            Shell.runBounded(adbPath, args: ["disconnect", target], timeout: 1.5)
         }
         appManagedWirelessTargets.removeAll()
     }

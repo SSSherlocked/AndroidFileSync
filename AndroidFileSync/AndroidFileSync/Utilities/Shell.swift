@@ -64,6 +64,40 @@ struct Shell {
         return (process.terminationStatus, output, error)
     }
     
+    /// Runs a command synchronously but never longer than `timeout`; output is
+    /// discarded. For quit-time cleanup on the main thread: a plain `run` reads its
+    /// pipes until EOF, which never comes if adb spawns a server that inherits them
+    /// or blocks on an unreachable wireless device, and the app hangs on ⌘Q.
+    /// Returns false when the command failed to start or had to be killed.
+    @discardableResult
+    static func runBounded(_ command: String, args: [String], timeout: TimeInterval) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: command)
+        process.arguments = args
+        process.environment = activeADBEnvironment
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+
+        if finished.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            if finished.wait(timeout: .now() + 0.3) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+            }
+            return false
+        }
+        return process.terminationStatus == 0
+    }
+
     // Truly async run using continuation and termination handler
     // Drains stdout/stderr dynamically to prevent pipe buffer deadlock under large outputs.
     // Handles Swift Task cancellation by terminating the running Process.
