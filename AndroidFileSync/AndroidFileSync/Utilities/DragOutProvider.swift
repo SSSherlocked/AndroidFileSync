@@ -36,18 +36,6 @@ nonisolated enum DragOutProvider {
         let provider = NSItemProvider()
         provider.suggestedName = file.name
 
-        // In-app payload (device path) for moving onto folders or adding to the
-        // sidebar. Visible to this process only, so Finder still gets the file.
-        if let payload = try? JSONEncoder().encode(DraggedDeviceItem(path: file.path, isDirectory: file.isDirectory)) {
-            provider.registerDataRepresentation(
-                forTypeIdentifier: DraggedDeviceItem.typeIdentifier,
-                visibility: .ownProcess
-            ) { completion in
-                completion(payload, nil)
-                return nil
-            }
-        }
-
         let typeIdentifier: String
         if file.isDirectory {
             typeIdentifier = UTType.folder.identifier
@@ -74,6 +62,20 @@ nonisolated enum DragOutProvider {
                 }
             }
             return progress
+        }
+
+        // In-app payload (device path) for moving onto folders or adding to the
+        // sidebar. Registered AFTER the file: the first registered representation is
+        // what a file-promise drop (Finder) writes out, so registering this first
+        // produced a file containing the JSON payload instead of the real file.
+        if let payload = try? JSONEncoder().encode(DraggedDeviceItem(path: file.path, isDirectory: file.isDirectory)) {
+            provider.registerDataRepresentation(
+                forTypeIdentifier: DraggedDeviceItem.typeIdentifier,
+                visibility: .ownProcess
+            ) { completion in
+                completion(payload, nil)
+                return nil
+            }
         }
 
         return provider
