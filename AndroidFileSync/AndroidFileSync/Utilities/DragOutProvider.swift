@@ -109,7 +109,15 @@ nonisolated enum DragOutProvider {
         return localURL
     }
 
+    private static let purgeQueue = DispatchQueue(label: "com.androidfilesync.dragout-purge", qos: .utility)
+
+    /// Removes old staged downloads in the background: this runs at the start of
+    /// every drag, and deleting large staged files must not block the main thread.
     private static func purgeOldStagingFolders() {
+        purgeQueue.async { purgeOldStagingFoldersNow() }
+    }
+
+    private static func purgeOldStagingFoldersNow() {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
             at: stagingRoot,

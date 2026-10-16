@@ -47,7 +47,7 @@ struct SidebarView: View {
                     ForEach(displayedQuickAccessItems) { item in
                         QuickAccessRow(
                             item: item,
-                            isChecking: !sidebarManager.checkedPaths.contains(item.path),
+                            isChecking: sidebarManager.isCheckingExistence && !sidebarManager.checkedPaths.contains(item.path),
                             storageInfo: storageStats[item.path],
                             onEdit: editAction(for: item),
                             onRemove: { sidebarManager.removeItem(item) },

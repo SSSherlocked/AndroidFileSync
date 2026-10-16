@@ -607,6 +607,11 @@ struct ContentView: View {
                 }
             }
             .onChange(of: deviceManager.isConnected) { connected in
+                if connected {
+                    // Sidebar folders checked before the device was ready stay
+                    // unconfirmed; re-check them now that adb can answer.
+                    Task { await sidebarManager.checkExistence() }
+                }
                 if !connected {
                     // If the health monitor is actively reconnecting in the background,
                     // keep the last loaded files visible as a read-only snapshot on screen.

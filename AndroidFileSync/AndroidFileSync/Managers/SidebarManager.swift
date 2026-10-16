@@ -58,44 +58,64 @@ class SidebarManager: ObservableObject {
 
     // MARK: - Existence Checking
 
+    /// True while an existence check is running (rows show a spinner only then).
+    @Published private(set) var isCheckingExistence = false
+    /// Set when a check is requested while one is running; it re-runs once after.
+    private var existenceCheckPending = false
+
     /// Checks which sidebar paths actually exist on the connected device via ADB.
-    /// Updates `existingPaths` and `checkedPaths` on the main actor.
+    /// Overlapping requests are merged, and a failed check (device not ready, adb
+    /// hiccup) changes nothing: folders are hidden only when confirmed missing.
     func checkExistence() async {
+        if isCheckingExistence {
+            existenceCheckPending = true
+            return
+        }
+        isCheckingExistence = true
+        repeat {
+            existenceCheckPending = false
+            await runExistenceCheck()
+        } while existenceCheckPending
+        isCheckingExistence = false
+    }
+
+    private func runExistenceCheck() async {
         let paths = visibleItems.map(\.path)
         guard !paths.isEmpty else { return }
 
-        // Build a single compound ADB shell command to check all paths at once:
-        // For each path: "[ -d '/path' ] && echo 1 || echo 0"
-        // We run them in sequence separated by ; so we get one line of output per path.
         let adbPath = ADBManager.getADBPath()
         guard !adbPath.isEmpty else { return }
 
+        // One shell command for all paths, one "1"/"0" line per path, so the check
+        // costs a single adb round-trip instead of one process per folder.
+        let script = paths.map { path in
+            let escaped = path.replacingOccurrences(of: "'", with: "'\\''")
+            return "[ -d '\(escaped)' ] && echo 1 || echo 0"
+        }.joined(separator: "; ")
+
+        let (code, output, _) = await Shell.runAsyncWithTimeout(
+            adbPath,
+            args: ADBManager.deviceArgs(["shell", script]),
+            timeoutSeconds: 8.0
+        )
+        let lines = output
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard code == 0, lines.count == paths.count, lines.allSatisfy({ $0 == "0" || $0 == "1" }) else {
+            print("📂 Sidebar: existence check inconclusive (code \(code), \(lines.count)/\(paths.count) lines) — keeping current state.")
+            return
+        }
+
         var newExisting: Set<String> = []
-        var newChecked: Set<String> = []
-
-        // Check in parallel with a task group
-        await withTaskGroup(of: (String, Bool).self) { group in
-            for path in paths {
-                group.addTask {
-                    let escaped = path.replacingOccurrences(of: "'", with: "'\\''")
-                    let (_, output, _) = await Shell.runAsync(
-                        adbPath,
-                        args: ADBManager.deviceArgs(["shell", "[ -d '\(escaped)' ] && echo 1 || echo 0"])
-                    )
-                    let exists = output.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
-                    return (path, exists)
-                }
-            }
-
-            for await (path, exists) in group {
-                newChecked.insert(path)
-                if exists { newExisting.insert(path) }
-            }
+        for (path, line) in zip(paths, lines) where line == "1" {
+            newExisting.insert(path)
         }
 
         await MainActor.run {
             self.existingPaths = newExisting
-            self.checkedPaths = newChecked
+            self.checkedPaths = Set(paths)
         }
     }
 
@@ -129,7 +149,12 @@ class SidebarManager: ObservableObject {
     /// Add the given Android path as a custom sidebar item.
     /// Silently ignores duplicates. Then re-checks existence.
     func addItem(name: String, path: String, icon: String = "folder.fill", color: String = "blue") {
-        guard !visibleItems.contains(where: { $0.path == path }) else { return }
+        guard !visibleItems.contains(where: { $0.path == path }) else {
+            // Already in the sidebar but possibly hidden by an earlier failed check:
+            // confirm it again instead of silently ignoring the drop.
+            Task { await checkExistence() }
+            return
+        }
         let item = QuickAccessItem(name: name, icon: icon, path: path, color: color, isBuiltIn: false)
         items.append(item)
         save()
