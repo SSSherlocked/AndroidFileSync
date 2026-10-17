@@ -54,6 +54,7 @@ struct SidebarView: View {
                             onRestoreHidden: restoreHiddenAction
                         )
                         .tag(SidebarItem.folder(item.path))
+                        .modifier(SidebarFolderDrop(onDropFolders: addDroppedFolders))
                     }
                     // Drag to reorder, like Finder's Favorites
                     .onMove { source, destination in
@@ -65,6 +66,8 @@ struct SidebarView: View {
                     }
                 } header: {
                     Text("Quick Access")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .modifier(SidebarFolderDrop(onDropFolders: addDroppedFolders))
                 }
                 
                 // ── Apps Section ─────────────────────────────────────────────────
@@ -110,25 +113,6 @@ struct SidebarView: View {
                 }
             }
             .listStyle(.sidebar)
-            // Drop a folder from the browser to add it, like Finder's Favorites.
-            // Not List.onInsert: that reads every type on the dragged item
-            // synchronously on the main thread, including the lazy drag-out file,
-            // whose download needs the main thread — a deadlock. onDrop only loads
-            // the in-app path payload, on demand.
-            .onDrop(of: [DraggedDeviceItem.type], isTargeted: nil) { providers in
-                Task {
-                    let folders = await DraggedDeviceItem.load(from: providers).filter(\.isDirectory)
-                    await MainActor.run {
-                        for folder in folders {
-                            sidebarManager.addItem(
-                                name: (folder.path as NSString).lastPathComponent,
-                                path: folder.path
-                            )
-                        }
-                    }
-                }
-                return true
-            }
         }
         .frame(minWidth: 200)
         .sheet(item: $editingItem) { item in
@@ -161,6 +145,16 @@ struct SidebarView: View {
         sidebarManager.visibleItems.filter { item in
             !sidebarManager.checkedPaths.contains(item.path)
                 || sidebarManager.existingPaths.contains(item.path)
+        }
+    }
+
+    /// Adds folders dragged from the browser, like Finder's Favorites.
+    private func addDroppedFolders(_ folders: [DraggedDeviceItem]) {
+        for folder in folders {
+            sidebarManager.addItem(
+                name: (folder.path as NSString).lastPathComponent,
+                path: folder.path
+            )
         }
     }
 
@@ -393,5 +387,34 @@ struct SidebarItemEditor: View {
         }
         .padding(20)
         .frame(width: 340)
+    }
+}
+
+// MARK: - Folder Drop
+
+/// Lets a sidebar row (or the Quick Access header) accept folders dragged from
+/// the browser. Attached per row rather than to the List: the List's outline view
+/// claims drags over itself and rejects types it doesn't know. Uses onDrop, not
+/// List.onInsert: onInsert reads every type on the dragged item synchronously on
+/// the main thread, including the lazy drag-out file whose download needs the
+/// main thread — a deadlock. onDrop loads only the in-app path payload, on demand.
+private struct SidebarFolderDrop: ViewModifier {
+    let onDropFolders: ([DraggedDeviceItem]) -> Void
+    @State private var isTargeted = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(Color.accentColor, lineWidth: isTargeted ? 2 : 0)
+            )
+            .onDrop(of: [DraggedDeviceItem.type], isTargeted: $isTargeted) { providers in
+                Task {
+                    let folders = await DraggedDeviceItem.load(from: providers).filter(\.isDirectory)
+                    guard !folders.isEmpty else { return }
+                    await MainActor.run { onDropFolders(folders) }
+                }
+                return true
+            }
     }
 }
