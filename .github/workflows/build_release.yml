@@ -228,6 +228,31 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The commit that was built, for its RELEASE_NOTES.md.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The release description is the version's hand-written section of
+      # RELEASE_NOTES.md (no generated commit list). A version without a
+      # section stops here, before anything is published.
+      - name: Release notes
+        id: notes
+        shell: bash
+        env:
+          TAG: ${{ needs.macos.outputs.tag }}
+        run: |
+          set -euo pipefail
+          heading="# AndroidFileSync $TAG"
+          awk -v heading="$heading" '
+            $0 == heading { found = 1; next }
+            found && /^---[[:space:]]*$/ { exit }
+            found && /^# AndroidFileSync v/ { exit }
+            found { print }
+          ' RELEASE_NOTES.md | sed -e '/./,$!d' > release_notes.md
+          if [[ ! -s release_notes.md ]]; then
+            echo "::error::RELEASE_NOTES.md has no section '$heading'. Add the release notes and run again."
+            exit 1
+          fi
+          cat release_notes.md
+          echo "body_path=$(pwd)/release_notes.md" >> "$GITHUB_OUTPUT"
       - name: Download all build artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -275,7 +300,9 @@ jobs:
           # The commit that was built, not whatever main is by now.
           target_commitish: ${{ github.sha }}
           prerelease: ${{ contains(needs.macos.outputs.version, '-') }}
-          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.body_path }}
+          generate_release_notes: false
+          append_body: false
           make_latest: ${{ !contains(needs.macos.outputs.version, '-') }}
           fail_on_unmatched_files: true
           files: |
