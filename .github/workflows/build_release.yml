@@ -261,6 +261,23 @@ jobs:
         shell: bash
         run: |
           find artifacts -type f -print | sort
+      # GitHub refuses to let this workflow's token create a tag on a commit
+      # whose workflow files differ from the default branch ("Resource not
+      # accessible by integration"). That happens when main gets workflow
+      # changes while this run builds an older commit. Check before anything is
+      # deleted, so an existing release is never removed by a run that can't
+      # publish its replacement.
+      - name: Check workflow files match the default branch
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$DEFAULT_BRANCH"
+          if ! git diff --quiet HEAD FETCH_HEAD -- .github/workflows; then
+            echo "::error::The workflows on $DEFAULT_BRANCH changed after this commit was built, so GitHub won't allow tagging it. Nothing was published or deleted. Run Build Release again from the latest $DEFAULT_BRANCH."
+            exit 1
+          fi
       # Republishing a version must move its tag to the commit being built, so
       # the old release and tag are removed first. Without replace_existing an
       # existing version stops the run instead of silently updating its files.
