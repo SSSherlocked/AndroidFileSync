@@ -6,6 +6,11 @@ Earlier history belongs to the original project: [Santosh7017/AndroidFileSync](h
 
 # AndroidFileSync v2.3.7
 
+## 👥 Multiple users
+
+- **Switch between Android users**: when the phone has more than one user (owner, app clone space, second space…), a user menu appears at the top of the sidebar. Choosing a user shows that user's storage; Quick Access's default folders, the Go menu and `~` in Go to Folder follow it. On connect, the phone's current user is selected.
+- **Every user is tested first**: some phones block other users' storage. Before a user can be chosen, the app checks that its folders can really be opened and whether files can be written. Blocked users are listed with the reason and can't be chosen; users whose files are blocked but whose media library is readable are marked "media library only" (not browsable yet).
+
 ## 📌 Sidebar
 
 - **Pin a folder by dragging it to the sidebar**: drag a folder from the file list between the Quick Access folders, or onto the new "Drop folders here to pin" strip at the bottom of the sidebar, which highlights while you hover. You can still pin a folder by right-clicking it and choosing Add to Sidebar.
