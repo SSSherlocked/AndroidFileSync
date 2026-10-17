@@ -14,6 +14,11 @@ on:
         required: false
         type: string
         default: ""
+      replace_existing:
+        description: Replace an existing release and tag with the same version
+        required: true
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -231,6 +236,37 @@ jobs:
         shell: bash
         run: |
           find artifacts -type f -print | sort
+      # Republishing a version must move its tag to the commit being built, so
+      # the old release and tag are removed first. Without replace_existing an
+      # existing version stops the run instead of silently updating its files.
+      - name: Handle existing release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.macos.outputs.tag }}
+          REPLACE: ${{ inputs.replace_existing }}
+        run: |
+          set -euo pipefail
+          release_exists=false
+          tag_exists=false
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then release_exists=true; fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then tag_exists=true; fi
+          if [[ "$release_exists" == false && "$tag_exists" == false ]]; then
+            echo "$TAG is new."
+            exit 0
+          fi
+          if [[ "$REPLACE" != "true" ]]; then
+            echo "::error::$TAG already exists. Tick 'Replace an existing release' to republish it, or use a new version."
+            exit 1
+          fi
+          if [[ "$release_exists" == true ]]; then
+            echo "Deleting release $TAG"
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "Deleting tag $TAG"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG"
+          fi
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
