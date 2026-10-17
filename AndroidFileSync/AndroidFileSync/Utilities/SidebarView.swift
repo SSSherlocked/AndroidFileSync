@@ -54,7 +54,6 @@ struct SidebarView: View {
                             onRestoreHidden: restoreHiddenAction
                         )
                         .tag(SidebarItem.folder(item.path))
-                        .modifier(SidebarFolderDrop(onDropFolders: addDroppedFolders))
                     }
                     // Drag to reorder, like Finder's Favorites
                     .onMove { source, destination in
@@ -66,8 +65,6 @@ struct SidebarView: View {
                     }
                 } header: {
                     Text("Quick Access")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .modifier(SidebarFolderDrop(onDropFolders: addDroppedFolders))
                 }
                 
                 // ── Apps Section ─────────────────────────────────────────────────
@@ -113,6 +110,12 @@ struct SidebarView: View {
                 }
             }
             .listStyle(.sidebar)
+
+            // Pin folders by dropping them here. This sits outside the List on
+            // purpose: drops inside a SwiftUI List go through the List's own
+            // insertion handling, which rejects (or, via onInsert, deadlocks on)
+            // items from the browser.
+            SidebarPinDropZone(onDropFolders: addDroppedFolders)
         }
         .frame(minWidth: 200)
         .sheet(item: $editingItem) { item in
@@ -390,31 +393,47 @@ struct SidebarItemEditor: View {
     }
 }
 
-// MARK: - Folder Drop
+// MARK: - Pin Drop Zone
 
-/// Lets a sidebar row (or the Quick Access header) accept folders dragged from
-/// the browser. Attached per row rather than to the List: the List's outline view
-/// claims drags over itself and rejects types it doesn't know. Uses onDrop, not
-/// List.onInsert: onInsert reads every type on the dragged item synchronously on
-/// the main thread, including the lazy drag-out file whose download needs the
-/// main thread — a deadlock. onDrop loads only the in-app path payload, on demand.
-private struct SidebarFolderDrop: ViewModifier {
+/// Strip at the bottom of the sidebar that pins folders dragged from the browser.
+/// Uses onDrop, which loads only the in-app path payload on demand — never the
+/// lazy drag-out file, whose download needs the main thread.
+private struct SidebarPinDropZone: View {
     let onDropFolders: ([DraggedDeviceItem]) -> Void
     @State private var isTargeted = false
 
-    func body(content: Content) -> some View {
-        content
-            .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .strokeBorder(Color.accentColor, lineWidth: isTargeted ? 2 : 0)
-            )
-            .onDrop(of: [DraggedDeviceItem.type], isTargeted: $isTargeted) { providers in
-                Task {
-                    let folders = await DraggedDeviceItem.load(from: providers).filter(\.isDirectory)
-                    guard !folders.isEmpty else { return }
-                    await MainActor.run { onDropFolders(folders) }
-                }
-                return true
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "pin")
+            Text("Drop folders here to pin")
+                .lineLimit(1)
+        }
+        .font(.system(size: 11))
+        .foregroundColor(isTargeted ? .accentColor : .secondary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Color.accentColor.opacity(isTargeted ? 0.12 : 0))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .strokeBorder(
+                    isTargeted ? Color.accentColor : Color.secondary.opacity(0.3),
+                    style: StrokeStyle(lineWidth: 1, dash: isTargeted ? [] : [4, 3])
+                )
+        )
+        .padding(.horizontal, 10)
+        .padding(.bottom, 10)
+        .contentShape(Rectangle())
+        .onDrop(of: [DraggedDeviceItem.type], isTargeted: $isTargeted) { providers in
+            Task {
+                let folders = await DraggedDeviceItem.load(from: providers).filter(\.isDirectory)
+                guard !folders.isEmpty else { return }
+                await MainActor.run { onDropFolders(folders) }
             }
+            return true
+        }
+        .help("Drag a folder from the file list here to add it to Quick Access")
     }
 }
