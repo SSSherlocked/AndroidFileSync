@@ -63,6 +63,19 @@ struct SidebarView: View {
                             toOffset: destination
                         )
                     }
+                    // Drop a folder from the browser between the rows to pin it.
+                    // The List reads every type on the item synchronously before
+                    // calling this, including the lazy drag-out file; DragOutProvider
+                    // now refuses that file while the main thread is blocked, so the
+                    // read fails fast instead of deadlocking. The strip below the
+                    // list remains as the stall-free target.
+                    .onInsert(of: [DraggedDeviceItem.type]) { _, providers in
+                        Task {
+                            let folders = await DraggedDeviceItem.load(from: providers).filter(\.isDirectory)
+                            guard !folders.isEmpty else { return }
+                            await MainActor.run { addDroppedFolders(folders) }
+                        }
+                    }
                 } header: {
                     Text("Quick Access")
                 }

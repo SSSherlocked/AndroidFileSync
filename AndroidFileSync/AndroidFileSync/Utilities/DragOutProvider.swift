@@ -51,6 +51,17 @@ nonisolated enum DragOutProvider {
         ) { completion in
             let progress = Progress(totalUnitCount: 1)
             Task.detached {
+                // The download runs through the main actor. When this representation
+                // is read synchronously inside our own process (SwiftUI's List drop
+                // insertion, an onDrop that loads a URL from the item), the main
+                // thread is parked waiting for the result, so the download could never
+                // finish and the app froze for good. Refuse the file in that case:
+                // in-app drops only need the device-path payload below.
+                guard await mainThreadResponds(within: mainThreadProbeTimeout) else {
+                    print("⚠️ Drag-out for \(file.name) requested while the main thread is blocked — refusing")
+                    completion(nil, false, mainThreadBlockedError)
+                    return
+                }
                 do {
                     let url = try await stage(file, downloadManager: downloadManager)
                     progress.completedUnitCount = 1
@@ -79,6 +90,45 @@ nonisolated enum DragOutProvider {
         }
 
         return provider
+    }
+
+    /// How long the main thread gets to answer the probe before a file request is refused.
+    /// An idle main thread answers in well under a millisecond; a thread that is blocked
+    /// in a synchronous pasteboard read never answers.
+    private static let mainThreadProbeTimeout: TimeInterval = 0.5
+
+    private static let mainThreadBlockedError = NSError(
+        domain: "DragOut", code: -2,
+        userInfo: [NSLocalizedDescriptionKey: "File requested while the app's main thread is blocked"]
+    )
+
+    /// True when the main thread runs a block within `timeout`. Never blocks the caller.
+    private static func mainThreadResponds(within timeout: TimeInterval) async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let once = ResumeOnce(continuation)
+            DispatchQueue.main.async { once.resume(returning: true) }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout) {
+                once.resume(returning: false)
+            }
+        }
+    }
+
+    /// Resumes a continuation at most once, from whichever of two queues gets there first.
+    private final class ResumeOnce: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Bool, Never>?
+
+        init(_ continuation: CheckedContinuation<Bool, Never>) {
+            self.continuation = continuation
+        }
+
+        func resume(returning value: Bool) {
+            lock.lock()
+            let pending = continuation
+            continuation = nil
+            lock.unlock()
+            pending?.resume(returning: value)
+        }
     }
 
     /// Pulls the file or folder into a unique staging folder and returns its local URL.

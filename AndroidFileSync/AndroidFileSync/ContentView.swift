@@ -819,18 +819,16 @@ struct ContentView: View {
             appManager.operationEngine.uploadManager = uploadManager
             appManager.operationEngine.downloadManager = downloadManager
         }
+        // Window-wide drop target for Mac files. It also receives in-app drags that
+        // land where nothing else accepts them (the sidebar list, for one), so it
+        // must not load a URL from those: an in-app item's URL is its lazy drag-out
+        // file, and resolving that inside our own process blocked the main thread
+        // on its own download — the app froze. loadFileURLs skips in-app items.
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            var fileURLs: [URL] = []
-            let group = DispatchGroup()
-            for provider in providers {
-                group.enter()
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    if let u = url { fileURLs.append(u) }
-                    group.leave()
-                }
-            }
-            group.notify(queue: .main) {
-                if !fileURLs.isEmpty {
+            Task {
+                let fileURLs = await DraggedDeviceItem.loadFileURLs(from: providers)
+                await MainActor.run {
+                    guard !fileURLs.isEmpty else { return }
                     if let filter = activeAppFilter {
                         // User is in the App Manager!
                         // Install any dropped app package formats
