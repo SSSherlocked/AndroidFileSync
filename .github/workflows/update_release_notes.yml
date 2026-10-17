@@ -1,0 +1,103 @@
+# Manual: rewrites the description of published releases from RELEASE_NOTES.md,
+# replacing whatever they had before (e.g. GitHub's generated commit list).
+# Only the description changes; tags, titles and attached files stay as they are.
+name: Update Release Notes
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: Versions to update, comma-separated (e.g. 2.3.7,2.3.8). Leave empty for every release.
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: Only show what would change, without editing any release
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: update-release-notes
+  cancel-in-progress: false
+jobs:
+  update:
+    name: Update release descriptions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rewrite release descriptions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSIONS: ${{ inputs.versions }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          # Same extraction as Build Release: the lines between
+          # "# AndroidFileSync <tag>" and the next "---" or version heading.
+          section() {
+            awk -v heading="# AndroidFileSync $1" '
+              $0 == heading { found = 1; next }
+              found && /^---[[:space:]]*$/ { exit }
+              found && /^# AndroidFileSync v/ { exit }
+              found { print }
+            ' RELEASE_NOTES.md | sed -e '/./,$!d'
+          }
+
+          if [[ -n "${VERSIONS// /}" ]]; then
+            tags=$(echo "$VERSIONS" | tr ',' '\n' | sed -e 's/[[:space:]]//g' -e '/^$/d' -e 's/^v*/v/')
+          else
+            tags=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName --jq '.[].tagName')
+          fi
+
+          updated=0
+          skipped=0
+          {
+            echo "### Release notes update"
+            echo
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "_Dry run: nothing was changed._"
+              echo
+            fi
+            echo "| Release | Result |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for tag in $tags; do
+            if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "::warning::$tag has no published release — skipped."
+              echo "| $tag | no such release, skipped |" >> "$GITHUB_STEP_SUMMARY"
+              skipped=$((skipped + 1))
+              continue
+            fi
+
+            notes_file="$RUNNER_TEMP/notes-$tag.md"
+            section "$tag" > "$notes_file"
+            if [[ ! -s "$notes_file" ]]; then
+              echo "::warning::RELEASE_NOTES.md has no section for $tag — left unchanged."
+              echo "| $tag | no section in RELEASE_NOTES.md, unchanged |" >> "$GITHUB_STEP_SUMMARY"
+              skipped=$((skipped + 1))
+              continue
+            fi
+
+            echo "::group::$tag"
+            cat "$notes_file"
+            echo "::endgroup::"
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "| $tag | would be updated |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file "$notes_file"
+              echo "| $tag | updated |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            updated=$((updated + 1))
+          done
+
+          echo "Updated: $updated, skipped: $skipped"
+          if [[ "$updated" -eq 0 ]]; then
+            echo "::error::No release was updated."
+            exit 1
+          fi
