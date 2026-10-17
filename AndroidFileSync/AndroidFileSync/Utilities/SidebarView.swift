@@ -63,20 +63,6 @@ struct SidebarView: View {
                             toOffset: destination
                         )
                     }
-                    // Drop a folder from the browser to add it, like Finder's Favorites
-                    .onInsert(of: [DraggedDeviceItem.type]) { _, providers in
-                        Task {
-                            let folders = await DraggedDeviceItem.load(from: providers).filter(\.isDirectory)
-                            await MainActor.run {
-                                for folder in folders {
-                                    sidebarManager.addItem(
-                                        name: (folder.path as NSString).lastPathComponent,
-                                        path: folder.path
-                                    )
-                                }
-                            }
-                        }
-                    }
                 } header: {
                     Text("Quick Access")
                 }
@@ -124,6 +110,25 @@ struct SidebarView: View {
                 }
             }
             .listStyle(.sidebar)
+            // Drop a folder from the browser to add it, like Finder's Favorites.
+            // Not List.onInsert: that reads every type on the dragged item
+            // synchronously on the main thread, including the lazy drag-out file,
+            // whose download needs the main thread — a deadlock. onDrop only loads
+            // the in-app path payload, on demand.
+            .onDrop(of: [DraggedDeviceItem.type], isTargeted: nil) { providers in
+                Task {
+                    let folders = await DraggedDeviceItem.load(from: providers).filter(\.isDirectory)
+                    await MainActor.run {
+                        for folder in folders {
+                            sidebarManager.addItem(
+                                name: (folder.path as NSString).lastPathComponent,
+                                path: folder.path
+                            )
+                        }
+                    }
+                }
+                return true
+            }
         }
         .frame(minWidth: 200)
         .sheet(item: $editingItem) { item in
