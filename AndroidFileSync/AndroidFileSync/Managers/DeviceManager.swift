@@ -1250,8 +1250,10 @@ class DeviceManager: ObservableObject {
         return adbFiles.map { UnifiedFile(from: $0) }
     }
     
+    /// Storage root of the selected device user (the owner unless another user
+    /// was detected as browsable and selected; see DeviceUsers).
     func getRealStoragePath() async -> String {
-        return "/storage/emulated/0" // Default fallback
+        await MainActor.run { DeviceUsers.shared.activeStorageRoot }
     }
     
     /// Queries default port 5037 to check if there is a physical USB device occupied by another server.

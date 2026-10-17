@@ -33,15 +33,44 @@ class SidebarManager: ObservableObject {
 
     // MARK: - Computed
 
+    /// Storage root of the active device user (owner, clone space…). Built-in
+    /// folders are stored with the owner's paths and shown under this root.
+    @Published var storageRoot = DeviceUsers.ownerStorageRoot {
+        didSet {
+            guard storageRoot != oldValue else { return }
+            Task { await checkExistence() }
+        }
+    }
+
     /// All currently visible sidebar items (stored order + SD card if present)
     var visibleItems: [QuickAccessItem] {
-        var result = items
+        var result = items.map(displayed)
         // Insert SD card right after Internal Storage if detected
         if let sd = sdCardItem {
-            let insertIndex = result.firstIndex(where: { $0.path == "/storage/emulated/0" }).map { $0 + 1 } ?? 1
+            let insertIndex = result.firstIndex(where: { $0.path == storageRoot }).map { $0 + 1 } ?? 1
             result.insert(sd, at: min(insertIndex, result.count))
         }
         return result
+    }
+
+    /// A stored item as shown: built-in folders follow the active user's storage
+    /// root; custom folders keep their exact path.
+    private func displayed(_ item: QuickAccessItem) -> QuickAccessItem {
+        let owner = DeviceUsers.ownerStorageRoot
+        guard item.isBuiltIn, storageRoot != owner,
+              item.path == owner || item.path.hasPrefix(owner + "/") else { return item }
+        return QuickAccessItem(
+            name: item.name,
+            icon: item.icon,
+            path: storageRoot + String(item.path.dropFirst(owner.count)),
+            color: item.color,
+            isBuiltIn: true
+        )
+    }
+
+    /// Index in `items` of the stored item behind a displayed path.
+    private func storedIndex(forDisplayedPath path: String) -> Int? {
+        items.firstIndex { displayed($0).path == path }
     }
 
     /// True when at least one built-in item is hidden (so user can restore)
@@ -49,7 +78,7 @@ class SidebarManager: ObservableObject {
 
     /// Stored items can be renamed/recoloured; the dynamic SD card entry cannot.
     func isEditable(_ item: QuickAccessItem) -> Bool {
-        items.contains { $0.path == item.path }
+        storedIndex(forDisplayedPath: item.path) != nil
     }
 
     // MARK: - Init
@@ -164,9 +193,10 @@ class SidebarManager: ObservableObject {
 
     /// Remove a sidebar item. Built-ins are hidden (restorable); custom items are deleted.
     func removeItem(_ item: QuickAccessItem) {
-        items.removeAll { $0.path == item.path }
-        if item.isBuiltIn {
-            hiddenBuiltInPaths.insert(item.path)
+        guard let index = storedIndex(forDisplayedPath: item.path) else { return }
+        let stored = items.remove(at: index)
+        if stored.isBuiltIn {
+            hiddenBuiltInPaths.insert(stored.path)
         } else {
             existingPaths.remove(item.path)
             checkedPaths.remove(item.path)
@@ -176,7 +206,7 @@ class SidebarManager: ObservableObject {
 
     /// Change an item's display name, icon and colour. The path stays the same.
     func updateItem(path: String, name: String, icon: String, color: String) {
-        guard let index = items.firstIndex(where: { $0.path == path }) else { return }
+        guard let index = storedIndex(forDisplayedPath: path) else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { items[index].name = trimmed }
         items[index].icon = icon
@@ -192,12 +222,17 @@ class SidebarManager: ObservableObject {
         var reordered = displayed
         reordered.move(fromOffsets: source, toOffset: destination)
 
-        let storedPaths = Set(items.map(\.path))
-        var queue = reordered.filter { storedPaths.contains($0.path) }.makeIterator()
+        // `displayed` holds items as shown (built-ins under the active user's
+        // root); map them back to the stored items before writing the order.
+        let storedByDisplayedPath = Dictionary(
+            items.map { (self.displayed($0).path, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var queue = reordered.compactMap { storedByDisplayedPath[$0.path] }.makeIterator()
         let shownPaths = Set(displayed.map(\.path))
 
         items = items.map { item in
-            guard shownPaths.contains(item.path), let next = queue.next() else { return item }
+            guard shownPaths.contains(self.displayed(item).path), let next = queue.next() else { return item }
             return next
         }
         save()

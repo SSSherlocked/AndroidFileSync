@@ -14,6 +14,7 @@ struct SidebarView: View {
     var storageStats: [String: DeviceManager.StorageInfo] = [:]
 
     @State private var showRestoreAlert = false
+    @ObservedObject private var deviceUsers = DeviceUsers.shared
     @State private var showEmptyTrashAlert = false
     @State private var editingItem: QuickAccessItem? = nil
     
@@ -40,6 +41,10 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if deviceUsers.hasMultipleUsers {
+                DeviceUserSwitcher(deviceUsers: deviceUsers)
+            }
+
             List(selection: selectionBinding) {
 
                 // ── Quick Access ────────────────────────────────────────────────
@@ -448,5 +453,57 @@ private struct SidebarPinDropZone: View {
             return true
         }
         .help("Drag a folder from the file list here to add it to Quick Access")
+    }
+}
+
+// MARK: - Device User Switcher
+
+/// Picks which Android user's storage the browser shows. Users that failed the
+/// access test are listed with the reason and can't be chosen.
+private struct DeviceUserSwitcher: View {
+    @ObservedObject var deviceUsers: DeviceUsers
+
+    var body: some View {
+        Menu {
+            ForEach(deviceUsers.users) { user in
+                Button {
+                    deviceUsers.select(user)
+                } label: {
+                    if user.id == deviceUsers.activeUserID {
+                        Label(title(for: user), systemImage: "checkmark")
+                    } else {
+                        Text(title(for: user))
+                    }
+                }
+                .disabled(!user.canBrowseFiles)
+            }
+            Divider()
+            Button("Check Users Again") {
+                Task { await deviceUsers.refresh() }
+            }
+            .disabled(deviceUsers.isRefreshing)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "person.crop.circle")
+                Text(deviceUsers.activeUser.map { "\($0.displayName) · \($0.id)" } ?? "Owner · 0")
+                    .lineLimit(1)
+                if deviceUsers.isRefreshing {
+                    ProgressView().controlSize(.mini)
+                }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+        .help("Android user whose storage is shown")
+    }
+
+    private func title(for user: DeviceUser) -> String {
+        let base = "\(user.displayName) · \(user.id)"
+        let status = user.accessDescription
+        return status.isEmpty ? base : "\(base) — \(status)"
     }
 }

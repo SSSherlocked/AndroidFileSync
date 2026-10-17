@@ -86,6 +86,7 @@ struct ContentView: View {
     @State private var isClaimingUSB = false
     @ObservedObject private var updateChecker = UpdateChecker.shared
     @ObservedObject private var diagnosticsControl = DiagnosticsControl.shared
+    @ObservedObject private var deviceUsers = DeviceUsers.shared
 
     // Get Info panel state (⌘I)
     @State private var infoFile: UnifiedFile? = nil
@@ -438,12 +439,27 @@ struct ContentView: View {
                 }
             }
             .onChange(of: showHiddenFiles) { _ in updateDisplayedFiles() }
+            // Switching device user (sidebar menu, or the phone's foreground user
+            // detected on connect) shows that user's storage.
+            .onChange(of: deviceUsers.activeUserID) { _ in showActiveUserStorage() }
             // Finder-style type-to-select in the file list / icon view
             .background(
                 TypeSelectMonitor(isEnabled: activeAppFilter == nil) { prefix in
                     typeSelect(prefix)
                 }
             )
+    }
+
+    private func showActiveUserStorage() {
+        let root = deviceUsers.activeStorageRoot
+        sidebarManager.storageRoot = root
+        guard deviceManager.isConnected, currentPath != root else { return }
+        activeAppFilter = nil
+        selectedFiles.removeAll()
+        currentPath = root
+        pathHistory.removeAll()
+        forwardHistory.removeAll()
+        Task { await loadFiles() }
     }
 
     /// Selects the first displayed item whose name starts with `prefix`.
@@ -600,6 +616,10 @@ struct ContentView: View {
                 // Reload the file browser whenever the active device changes.
                 guard deviceManager.isConnected, !newName.isEmpty, newName != "No Device" else { return }
                 Task {
+                    // A different phone has different users; test them before
+                    // choosing which storage to show.
+                    await deviceUsers.refresh()
+                    sidebarManager.storageRoot = deviceUsers.activeStorageRoot
                     currentPath = await deviceManager.getRealStoragePath()
                     pathHistory.removeAll()
                     forwardHistory.removeAll()
@@ -611,6 +631,9 @@ struct ContentView: View {
                     // Sidebar folders checked before the device was ready stay
                     // unconfirmed; re-check them now that adb can answer.
                     Task { await sidebarManager.checkExistence() }
+                    // Detect the phone's users and test what each allows; switching
+                    // to the foreground user is handled by onChange(activeUserID).
+                    Task { await deviceUsers.refresh() }
                 }
                 if !connected {
                     // If the health monitor is actively reconnecting in the background,
@@ -1156,8 +1179,14 @@ struct ContentView: View {
             goUp: { handleNavigateUp() },
             goToFolder: { showGoToFolder = true },
             goToPath: { path in
+                // Go menu folders are owner paths; open them in the selected user.
+                let owner = DeviceUsers.ownerStorageRoot
+                let root = deviceUsers.activeStorageRoot
+                let target = path == owner || path.hasPrefix(owner + "/")
+                    ? root + String(path.dropFirst(owner.count))
+                    : path
                 activeAppFilter = nil
-                navigateTo(path)
+                navigateTo(target)
             },
             sort: { option in
                 sortFiles(by: option, ascending: sortOption == option ? !sortAscending : true)

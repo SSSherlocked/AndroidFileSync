@@ -35,6 +35,7 @@
 				Managers/AppManager.swift,
 				Managers/ConnectionHealthMonitor.swift,
 				Managers/DeviceManager.swift,
+				Managers/DeviceUsers.swift,
 				Managers/DownloadManager.swift,
 				Managers/FileActionManager.swift,
 				Managers/FilePreviewManager.swift,

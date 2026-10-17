@@ -18,7 +18,8 @@ struct GoToFolderView: View {
     @State private var isChecking = false
     @State private var suggestionTask: Task<Void, Never>?
 
-    private static let internalStorage = "/storage/emulated/0"
+    /// `~` is the selected device user's storage root.
+    private static var internalStorage: String { DeviceUsers.shared.activeStorageRoot }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
