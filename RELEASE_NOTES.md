@@ -4,19 +4,12 @@ This file records the changes in each release of [SSSherlocked/AndroidFileSync](
 
 Earlier history belongs to the original project: [Santosh7017/AndroidFileSync](https://github.com/Santosh7017/AndroidFileSync).
 
-# AndroidFileSync v2.3.8
+# AndroidFileSync v2.3.7
 
 ## 📌 Sidebar
 
 - **Pin a folder by dragging it to the sidebar**: drag a folder from the file list between the Quick Access folders, or onto the new "Drop folders here to pin" strip at the bottom of the sidebar, which highlights while you hover. You can still pin a folder by right-clicking it and choosing Add to Sidebar.
 - **No more freeze when dropping folders on the sidebar**: dropping a folder anywhere on the sidebar used to hang the app, so it had to be force quit. A drop now only reads where the folder is on the phone, never its contents, so it can't hang.
-
----
-
-# AndroidFileSync v2.3.7
-
-## 📌 Sidebar
-
 - **Quick Access folders no longer go missing**: if the app opened before the phone was fully connected, some sidebar folders could disappear until another folder was added. Folders are now hidden only when the phone confirms they don't exist, and the sidebar is checked again as soon as the phone connects.
 - **Pinning a folder that is already in the sidebar** shows it again if it had been hidden by mistake, instead of doing nothing.
 
