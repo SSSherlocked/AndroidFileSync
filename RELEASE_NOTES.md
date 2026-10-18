@@ -20,7 +20,13 @@ Earlier history belongs to the original project: [Santosh7017/AndroidFileSync](h
 
 ## 🖱 Drag and drop
 
+- **Text files can be dragged to Finder**: .txt, .log, .json and other text files used to be refused when dropped in Finder. They now download like any other file.
 - **Starting a drag no longer stalls**: cleaning up old temporary files left by earlier drags now happens in the background instead of blocking the window.
+
+## 📄 Opening files
+
+- **Double-click opens a file in its Mac app**, as in Finder: the file is downloaded to a temporary folder and opened with its default app. If no app on the Mac can open it, you're asked where to save it instead. File › Open (⌘↓) does the same; Space still shows the preview.
+- **Text files show their contents in the preview**: txt, log, md, json, csv and source code files show their text (the first 512 KB) instead of only an icon.
 
 ---
 
