@@ -59,7 +59,9 @@ jobs:
           # matches does not end the report early.
           set +e -uo pipefail
           test -f xcodebuild.log || exit 0
-          errors=$(grep -E '(: error: |^error: |\*\* (BUILD|TEST) FAILED \*\*)' xcodebuild.log | sort -u | head -n 40)
+          # Compiler errors, failed assertions, and test-runner problems (a host
+          # app that crashed or failed to launch reports no "error:" line).
+          errors=$(grep -E '(: error: |^error: |\*\* (BUILD|TEST) FAILED \*\*|Testing failed|Test Case .* failed|[Cc]rashed|unexpected exit|Fatal error|failed to (load|launch)|Could not)' xcodebuild.log | sort -u | head -n 40)
           {
             echo "### Build and test errors"
             echo
@@ -79,9 +81,12 @@ jobs:
               echo "::error::${line}"
             fi
           done
-          printf '%s\n' "$errors" | grep -E '^error: ' | while IFS= read -r line; do
+          printf '%s\n' "$errors" | grep -vE ': error: ' | grep -v '^$' | while IFS= read -r line; do
             echo "::error::${line}"
           done
+          # The end of the log usually explains a failure the patterns missed.
+          tail_text=$(tail -n 25 xcodebuild.log | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::error title=Last lines of the xcodebuild log::${tail_text}"
           exit 0
       - name: Upload build log
         if: failure()
