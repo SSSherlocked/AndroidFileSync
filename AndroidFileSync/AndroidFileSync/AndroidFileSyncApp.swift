@@ -47,7 +47,6 @@ struct AndroidFileSyncApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     
-    private let dropCoordinator = DropCoordinator()
     private let showQuitDebuggingReminderKey = "showQuitDebuggingReminder"
     private var localKeyMonitor: Any?
     
@@ -70,18 +69,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         AppLogger.addSessionSeparator()
         AppLogger.log("🚀 AndroidFileSync started successfully on macOS.")
-        guard let window = NSApp.windows.first,
-              let contentView = window.contentView else {
+        guard let window = NSApp.windows.first else {
             return
         }
         
         // Allow dragging the window from any non-interactive area
         // (path bar, empty space, breadcrumbs etc.) — the correct Apple approach
         window.isMovableByWindowBackground = true
-        
-        // Register for drag-and-drop
-        contentView.registerForDraggedTypes([.fileURL])
-        (contentView as? NSView)?.window?.registerForDraggedTypes([.fileURL])
+
+        // Drag-and-drop types are registered by SwiftUI's drop modifiers. Don't
+        // register them here: registerForDraggedTypes replaces the view's whole
+        // list, dropping the types SwiftUI registered for in-app drop targets.
         
         installDeleteShortcutMonitor()
     }

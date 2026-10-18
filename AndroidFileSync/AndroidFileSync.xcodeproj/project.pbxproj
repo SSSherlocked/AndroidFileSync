@@ -6,6 +6,16 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		AF7E57000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 453BAF012EC66BC4008AABAB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 453BAF082EC66BC4008AABAB;
+			remoteInfo = AndroidFileSync;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXCopyFilesBuildPhase section */
 		453BAF2F2EC66C1D008AABAB /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
@@ -20,6 +30,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AF7E57000000000000000001 /* AndroidFileSyncTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AndroidFileSyncTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		453BAF092EC66BC4008AABAB /* AndroidFileSync.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AndroidFileSync.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		453BAF1D2EC66C1D008AABAB /* UniformTypeIdentifiers.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UniformTypeIdentifiers.framework; path = System/Library/Frameworks/UniformTypeIdentifiers.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
@@ -53,8 +64,6 @@
 				Utilities/BrowserCommands.swift,
 				Utilities/ConflictDialog.swift,
 				Utilities/DragOutProvider.swift,
-				Utilities/DropCoordinator.swift,
-				Utilities/FileDropDelegate.swift,
 				Utilities/FileIcon.swift,
 				Utilities/FileNameHelper.swift,
 				Utilities/FolderDropTarget.swift,
@@ -101,10 +110,22 @@
 			path = AndroidFileSync;
 			sourceTree = "<group>";
 		};
+		AF7E57000000000000000002 /* AndroidFileSyncTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AndroidFileSyncTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		453BAF062EC66BC4008AABAB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AF7E57000000000000000006 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -118,6 +139,7 @@
 			isa = PBXGroup;
 			children = (
 				4581BF032ED0772200D2F9EC /* AndroidFileSync */,
+				AF7E57000000000000000002 /* AndroidFileSyncTests */,
 				453BAF1C2EC66C1D008AABAB /* Frameworks */,
 				453BAF0A2EC66BC4008AABAB /* Products */,
 			);
@@ -127,6 +149,7 @@
 			isa = PBXGroup;
 			children = (
 				453BAF092EC66BC4008AABAB /* AndroidFileSync.app */,
+				AF7E57000000000000000001 /* AndroidFileSyncTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -162,6 +185,29 @@
 			productReference = 453BAF092EC66BC4008AABAB /* AndroidFileSync.app */;
 			productType = "com.apple.product-type.application";
 		};
+		AF7E57000000000000000008 /* AndroidFileSyncTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AF7E5700000000000000000B /* Build configuration list for PBXNativeTarget "AndroidFileSyncTests" */;
+			buildPhases = (
+				AF7E57000000000000000005 /* Sources */,
+				AF7E57000000000000000006 /* Frameworks */,
+				AF7E57000000000000000007 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AF7E57000000000000000004 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AF7E57000000000000000002 /* AndroidFileSyncTests */,
+			);
+			name = AndroidFileSyncTests;
+			packageProductDependencies = (
+			);
+			productName = AndroidFileSyncTests;
+			productReference = AF7E57000000000000000001 /* AndroidFileSyncTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -174,6 +220,10 @@
 				TargetAttributes = {
 					453BAF082EC66BC4008AABAB = {
 						CreatedOnToolsVersion = 26.1;
+					};
+					AF7E57000000000000000008 = {
+						CreatedOnToolsVersion = 26.1;
+						TestTargetID = 453BAF082EC66BC4008AABAB;
 					};
 				};
 			};
@@ -192,12 +242,20 @@
 			projectRoot = "";
 			targets = (
 				453BAF082EC66BC4008AABAB /* AndroidFileSync */,
+				AF7E57000000000000000008 /* AndroidFileSyncTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		453BAF072EC66BC4008AABAB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AF7E57000000000000000007 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -214,7 +272,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AF7E57000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AF7E57000000000000000004 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 453BAF082EC66BC4008AABAB /* AndroidFileSync */;
+			targetProxy = AF7E57000000000000000003 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		453BAF122EC66BC5008AABAB /* Debug */ = {
@@ -437,6 +510,42 @@
 			};
 			name = Release;
 		};
+		AF7E57000000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.santosh.AndroidFileSyncTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AndroidFileSync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AndroidFileSync";
+			};
+			name = Debug;
+		};
+		AF7E5700000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.santosh.AndroidFileSyncTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AndroidFileSync.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AndroidFileSync";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -454,6 +563,15 @@
 			buildConfigurations = (
 				453BAF152EC66BC5008AABAB /* Debug */,
 				453BAF162EC66BC5008AABAB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AF7E5700000000000000000B /* Build configuration list for PBXNativeTarget "AndroidFileSyncTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AF7E57000000000000000009 /* Debug */,
+				AF7E5700000000000000000A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

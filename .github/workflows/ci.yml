@@ -1,4 +1,4 @@
-# Automatic compile check for every push to main and every pull request.
+# Automatic build and test run for every push to main and every pull request.
 # Packaging and releases stay manual in build_release.yml.
 name: CI
 on:
@@ -20,7 +20,7 @@ env:
   APP_NAME: AndroidFileSync
 jobs:
   build:
-    name: Build (macOS)
+    name: Build and test (macOS)
     runs-on: macos-15
     timeout-minutes: 40
     steps:
@@ -33,9 +33,9 @@ jobs:
           test -n "$xcode_path"
           sudo xcode-select --switch "$xcode_path/Contents/Developer"
           xcodebuild -version
-      # Debug build for the runner's architecture only: this job checks that the
-      # app compiles, it does not produce anything to ship.
-      - name: Build
+      # Debug build for the runner's architecture only, then the unit tests
+      # (AndroidFileSyncTests): this job checks the app, it ships nothing.
+      - name: Build and test
         shell: bash
         run: |
           set -euo pipefail
@@ -48,7 +48,7 @@ jobs:
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            build 2>&1 | tee xcodebuild.log
+            test 2>&1 | tee xcodebuild.log
       # Logs need a GitHub sign-in to read; annotations and the job summary
       # make compiler errors visible from the run page and the API.
       - name: Report build errors
@@ -59,9 +59,9 @@ jobs:
           # matches does not end the report early.
           set +e -uo pipefail
           test -f xcodebuild.log || exit 0
-          errors=$(grep -E '(: error: |^error: |\*\* BUILD FAILED \*\*)' xcodebuild.log | sort -u | head -n 40)
+          errors=$(grep -E '(: error: |^error: |\*\* (BUILD|TEST) FAILED \*\*)' xcodebuild.log | sort -u | head -n 40)
           {
-            echo "### xcodebuild errors"
+            echo "### Build and test errors"
             echo
             echo '```'
             printf '%s\n' "${errors:-No error lines found; see the xcodebuild-log artifact.}"

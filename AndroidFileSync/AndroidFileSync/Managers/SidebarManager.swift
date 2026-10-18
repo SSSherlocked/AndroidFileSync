@@ -83,7 +83,13 @@ class SidebarManager: ObservableObject {
 
     // MARK: - Init
 
-    init() { load() }
+    /// Where items are persisted; tests pass their own suite.
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        load()
+    }
 
     // MARK: - Existence Checking
 
@@ -257,16 +263,16 @@ class SidebarManager: ObservableObject {
 
     private func save() {
         if let data = try? JSONEncoder().encode(items) {
-            UserDefaults.standard.set(data, forKey: itemsKey)
+            defaults.set(data, forKey: itemsKey)
         }
-        UserDefaults.standard.set(Array(hiddenBuiltInPaths), forKey: hiddenKey)
+        defaults.set(Array(hiddenBuiltInPaths), forKey: hiddenKey)
     }
 
     private func load() {
-        let hidden = Set(UserDefaults.standard.stringArray(forKey: hiddenKey) ?? [])
+        let hidden = Set(defaults.stringArray(forKey: hiddenKey) ?? [])
         hiddenBuiltInPaths = hidden
 
-        if let data = UserDefaults.standard.data(forKey: itemsKey),
+        if let data = defaults.data(forKey: itemsKey),
            let stored = try? JSONDecoder().decode([QuickAccessItem].self, from: data) {
             items = stored
             return
@@ -274,7 +280,7 @@ class SidebarManager: ObservableObject {
 
         // Migrate from v2: default built-ins (minus hidden) followed by custom items.
         var migrated = QuickAccessItem.commonFolders.filter { !hidden.contains($0.path) }
-        if let data = UserDefaults.standard.data(forKey: legacyCustomKey),
+        if let data = defaults.data(forKey: legacyCustomKey),
            let custom = try? JSONDecoder().decode([QuickAccessItem].self, from: data) {
             migrated += custom.filter { item in !migrated.contains { $0.path == item.path } }
         }

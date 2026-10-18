@@ -2,12 +2,27 @@
 //  DragOutProvider.swift
 //  AndroidFileSync
 //
-//  Drag files/folders from the file browser out to Finder (or any app that
-//  accepts file drops). The item provider registers a lazy file representation:
-//  nothing is transferred until the drop target asks for the data, at which
-//  point the item is pulled from the device into a temporary staging folder
-//  (with progress shown in the normal transfer UI) and handed to the receiver,
-//  which copies it to its final location.
+//  Everything a dragged device file carries, and the one way to read it back.
+//
+//  DRAG AND DROP RULES — every drag source and drop target goes through here.
+//  They are checked by DragAndDropContractTests; change the tests with the rules.
+//
+//  1. A dragged device item carries exactly two representations, in this order:
+//     a. the file itself, lazily: nothing is pulled from the phone until a
+//        receiver (Finder) asks for it. Files are always declared as plain data
+//        (`public.data`) and folders as `public.folder`, never as their specific
+//        type: Finder treats typed drags specially (text becomes a clipping and a
+//        file is refused), so one generic type behaves the same for every file.
+//        The suggested name carries the extension.
+//     b. the in-app payload (`DraggedDeviceItem`, the device path), visible to
+//        this process only. It must come second: a file-promise receiver writes
+//        out the FIRST representation.
+//  2. In-app drop targets never read the file representation. Reading it starts
+//     a download that needs the main thread, so a synchronous read from inside
+//     the app deadlocks. Use `DraggedDeviceItem.load(from:)` for device items and
+//     `DraggedDeviceItem.loadFileURLs(from:)` for Mac files; both skip the file
+//     representation of our own items. As a last line of defence the file
+//     representation refuses to download while the main thread is blocked.
 //
 
 import Foundation
@@ -32,26 +47,27 @@ nonisolated enum DragOutProvider {
 
     static func makeItemProvider(for file: UnifiedFile, downloadManager: DownloadManager) -> NSItemProvider {
         purgeOldStagingFolders()
+        return makeItemProvider(for: file) { file in
+            try await stage(file, downloadManager: downloadManager)
+        }
+    }
 
+    /// The declared type of a dragged item's file representation (rule 1a).
+    static func fileTypeIdentifier(for file: UnifiedFile) -> String {
+        file.isDirectory ? UTType.folder.identifier : UTType.data.identifier
+    }
+
+    /// Builds the provider; `stage` pulls the item to a local URL when a receiver
+    /// asks for the file. Separate from the DownloadManager wiring for tests.
+    static func makeItemProvider(
+        for file: UnifiedFile,
+        stage: @escaping @Sendable (UnifiedFile) async throws -> URL
+    ) -> NSItemProvider {
         let provider = NSItemProvider()
         provider.suggestedName = file.name
 
-        let typeIdentifier: String
-        if file.isDirectory {
-            typeIdentifier = UTType.folder.identifier
-        } else {
-            let ext = (file.name as NSString).pathExtension
-            let specific = UTType(filenameExtension: ext) ?? .data
-            // Finder treats a text-typed drag as text (a clipping) and refuses a
-            // file there, so .txt/.log/.json… are offered as plain data; the
-            // suggested name keeps the extension.
-            typeIdentifier = specific.conforms(to: .text) || specific.conforms(to: .url)
-                ? UTType.data.identifier
-                : specific.identifier
-        }
-
         provider.registerFileRepresentation(
-            forTypeIdentifier: typeIdentifier,
+            forTypeIdentifier: fileTypeIdentifier(for: file),
             fileOptions: [],
             visibility: .all
         ) { completion in
@@ -69,7 +85,7 @@ nonisolated enum DragOutProvider {
                     return
                 }
                 do {
-                    let url = try await stage(file, downloadManager: downloadManager)
+                    let url = try await stage(file)
                     progress.completedUnitCount = 1
                     // coordinated = false: the receiver copies the file before we delete it
                     completion(url, false, nil)
@@ -81,10 +97,7 @@ nonisolated enum DragOutProvider {
             return progress
         }
 
-        // In-app payload (device path) for moving onto folders or adding to the
-        // sidebar. Registered AFTER the file: the first registered representation is
-        // what a file-promise drop (Finder) writes out, so registering this first
-        // produced a file containing the JSON payload instead of the real file.
+        // In-app payload (rule 1b), registered AFTER the file representation.
         if let payload = try? JSONEncoder().encode(DraggedDeviceItem(path: file.path, isDirectory: file.isDirectory)) {
             provider.registerDataRepresentation(
                 forTypeIdentifier: DraggedDeviceItem.typeIdentifier,
