@@ -9,6 +9,7 @@
 import Foundation
 import AppKit
 import AVFoundation
+import UniformTypeIdentifiers
 internal import Combine
 
 // MARK: - Preview Content Types
@@ -19,6 +20,7 @@ enum PreviewContent: Equatable {
     case videoReady(URL)         // Full video file available for inline playback
     case audioIcon
     case documentIcon(String) // extension
+    case text(String, truncated: Bool)
     case loading
     case error(String)
     
@@ -30,6 +32,8 @@ enum PreviewContent: Equatable {
             return a == b
         case (.documentIcon(let a), .documentIcon(let b)):
             return a == b
+        case (.text(let a, let ta), .text(let b, let tb)):
+            return a == b && ta == tb
         case (.image(let a), .image(let b)):
             return a === b
         case (.videoThumbnail(let a), .videoThumbnail(let b)):
@@ -132,7 +136,7 @@ class FilePreviewManager: ObservableObject {
     
     // MARK: - Previewable Extensions (static, computed once)
     
-    private static let previewableExtensions: Set<String> = [
+    private static let previewableExtensions: Set<String> = Set([
         // Images
         "jpg", "jpeg", "png", "gif", "heic", "webp", "bmp", "tiff", "svg", "ico",
         // Videos
@@ -145,7 +149,15 @@ class FilePreviewManager: ObservableObject {
         "doc", "docx", "xls", "xlsx", "ppt", "pptx",
         // Code
         "swift", "java", "py", "js", "ts", "c", "cpp", "h", "css"
+    ]).union(textPreviewExtensions)
+
+    /// Shown as text in the preview panel (the first `textPreviewLimit` bytes).
+    nonisolated static let textPreviewExtensions: Set<String> = [
+        "txt", "log", "md", "json", "xml", "csv", "tsv", "html", "htm",
+        "yaml", "yml", "ini", "conf", "cfg", "properties", "sh",
+        "swift", "java", "kt", "py", "js", "ts", "c", "cpp", "h", "css"
     ]
+    private static let textPreviewLimit = 512 * 1024
     
     // MARK: - Public API
     
@@ -210,8 +222,12 @@ class FilePreviewManager: ObservableObject {
                 previewContent = .audioIcon
                 isLoading = false
             case .document, .unknown:
-                previewContent = .documentIcon(file.pathExtension)
-                isLoading = false
+                if Self.textPreviewExtensions.contains(file.pathExtension) {
+                    await loadTextPreview(file)
+                } else {
+                    previewContent = .documentIcon(file.pathExtension)
+                    isLoading = false
+                }
             }
         }
     }
@@ -240,10 +256,25 @@ class FilePreviewManager: ObservableObject {
     }
     
     /// Open the currently previewed file in an external app.
-    /// Pulls the full file if not already cached, then opens with NSWorkspace.
     func openInExternalApp() {
         guard let file = previewFile else { return }
-        
+        pullAndOpen(file)
+    }
+
+    /// Finder's double-click: opens a device file with its default Mac app.
+    /// Returns false, doing nothing, when no app on this Mac opens the type, so
+    /// the caller can offer to save the file instead.
+    @discardableResult
+    func openInDefaultApp(_ file: UnifiedFile) -> Bool {
+        guard !file.isDirectory else { return false }
+        let type = UTType(filenameExtension: file.pathExtension) ?? .data
+        guard NSWorkspace.shared.urlForApplication(toOpen: type) != nil else { return false }
+        pullAndOpen(file)
+        return true
+    }
+
+    /// Pulls the full file (unless already cached) and opens it with NSWorkspace.
+    private func pullAndOpen(_ file: UnifiedFile) {
         // Check file cache — if already pulled, open immediately
         if let cached = fileCache[file.path], FileManager.default.fileExists(atPath: cached.path) {
             NSWorkspace.shared.open(cached)
@@ -292,6 +323,33 @@ class FilePreviewManager: ObservableObject {
     }
     
     // MARK: - Tiered Preview Methods
+
+    /// Shows the beginning of a text file. Reads at most `textPreviewLimit` bytes
+    /// with `head`, so large logs don't have to be pulled whole.
+    private func loadTextPreview(_ file: UnifiedFile) async {
+        let adbPath = ADBManager.getADBPath()
+        guard !adbPath.isEmpty else {
+            previewContent = .error("ADB not found")
+            isLoading = false
+            return
+        }
+        let escaped = file.path.replacingOccurrences(of: "'", with: "'\\''")
+        let (code, output, error) = await Shell.runAsyncWithTimeout(
+            adbPath,
+            args: ADBManager.deviceArgs(["exec-out", "head -c \(Self.textPreviewLimit) '\(escaped)'"]),
+            timeoutSeconds: 15.0
+        )
+        guard !Task.isCancelled, previewFile?.path == file.path else { return }
+        if code != 0 {
+            previewContent = .error(error.isEmpty ? "Could not read the file" : error)
+        } else if output.isEmpty && file.size > 0 {
+            // Not valid UTF-8 (another encoding, or binary data).
+            previewContent = .documentIcon(file.pathExtension)
+        } else {
+            previewContent = .text(output, truncated: file.size > UInt64(Self.textPreviewLimit))
+        }
+        isLoading = false
+    }
     
     /// Load image preview by piping bytes via `adb exec-out cat`.
     /// No temp file needed — bytes convert directly to NSImage in memory.

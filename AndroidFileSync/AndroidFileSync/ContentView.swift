@@ -998,7 +998,8 @@ struct ContentView: View {
                             downloadManager: downloadManager,
                             viewMode: BrowserViewMode(rawValue: viewModeRaw) ?? .list,
                             onMoveItems: { paths, folder in moveItems(atPaths: paths, to: folder) },
-                            onUploadToFolder: { urls, folder in handleUpload(urls: urls, to: folder) }
+                            onUploadToFolder: { urls, folder in handleUpload(urls: urls, to: folder) },
+                            onOpenFile: { file in openFile(file) }
                         )
                         .equatable()
 
@@ -1443,9 +1444,16 @@ struct ContentView: View {
         
         if file.isDirectory {
             navigateTo(file.path)
-        } else if FilePreviewManager.isPreviewable(file) {
-            filePreviewManager.previewFile(file)
         } else {
+            openFile(file)
+        }
+    }
+
+    /// Finder's double-click: open the file with its default Mac app (it is pulled
+    /// to a temporary folder first). When no app on this Mac opens the type,
+    /// offer to save it instead. Space still shows the in-app preview.
+    private func openFile(_ file: UnifiedFile) {
+        if !filePreviewManager.openInDefaultApp(file) {
             handleDownload(file: file)
         }
     }

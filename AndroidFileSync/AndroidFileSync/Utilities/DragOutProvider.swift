@@ -41,7 +41,13 @@ nonisolated enum DragOutProvider {
             typeIdentifier = UTType.folder.identifier
         } else {
             let ext = (file.name as NSString).pathExtension
-            typeIdentifier = (UTType(filenameExtension: ext) ?? .data).identifier
+            let specific = UTType(filenameExtension: ext) ?? .data
+            // Finder treats a text-typed drag as text (a clipping) and refuses a
+            // file there, so .txt/.log/.json… are offered as plain data; the
+            // suggested name keeps the extension.
+            typeIdentifier = specific.conforms(to: .text) || specific.conforms(to: .url)
+                ? UTType.data.identifier
+                : specific.identifier
         }
 
         provider.registerFileRepresentation(

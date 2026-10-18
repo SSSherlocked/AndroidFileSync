@@ -77,6 +77,8 @@ struct FileBrowserView: View, Equatable {
     var onMoveItems: (([String], String) -> Void)? = nil
     /// Mac files dropped onto a folder: (local URLs, destination folder)
     var onUploadToFolder: (([URL], String) -> Void)? = nil
+    /// Double-click on a file (Finder: open it with its default app)
+    var onOpenFile: ((UnifiedFile) -> Void)? = nil
     
     // Equatable — compare data that affects rendering.
     // sortVersion detects user-initiated sort changes.
@@ -844,6 +846,8 @@ struct FileBrowserView: View, Equatable {
            let file = files.first(where: { $0.id == firstId }) {
             if file.isDirectory {
                 onNavigate(file.path)
+            } else if let onOpenFile {
+                onOpenFile(file)
             } else if FilePreviewManager.isPreviewable(file) {
                 onPreview?(file)
             } else {

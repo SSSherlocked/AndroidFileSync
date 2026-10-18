@@ -140,6 +140,8 @@ struct FilePreviewPanel: View {
             audioPreview
         case .documentIcon(let ext):
             documentPreview(ext)
+        case .text(let content, let truncated):
+            textPreview(content, truncated: truncated)
         case .error(let message):
             errorView(message)
         }
@@ -302,6 +304,26 @@ struct FilePreviewPanel: View {
     
     // MARK: - Document Preview
     
+    private func textPreview(_ content: String, truncated: Bool) -> some View {
+        VStack(spacing: 0) {
+            ScrollView([.vertical, .horizontal]) {
+                Text(content)
+                    .font(.system(size: 12, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(14)
+            }
+            if truncated {
+                Divider()
+                Text("Showing the first 512 KB. Open in App to see the whole file.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private func documentPreview(_ ext: String) -> some View {
         VStack(spacing: 20) {
             Image(systemName: documentSymbol(for: ext))
