@@ -84,6 +84,37 @@ jobs:
           printf '%s\n' "$errors" | grep -vE ': error: ' | grep -v '^$' | while IFS= read -r line; do
             echo "::error::${line}"
           done
+          # Failure messages from the test results (a crashed test is listed with
+          # its crash message) and the top of the crashing thread from macOS's
+          # crash reports, so crashes can be located without the log.
+          xcresult=$(find build/DerivedData/Logs/Test -name '*.xcresult' -maxdepth 1 | head -n 1)
+          if [[ -n "$xcresult" ]]; then
+            xcrun xcresulttool get test-results summary --path "$xcresult" --format json 2>/dev/null \
+              | python3 -c 'import json,sys
+          d = json.load(sys.stdin)
+          for f in d.get("testFailures", [])[:10]:
+              text = (f.get("testIdentifierString", "") + ": " + f.get("failureText", "")).replace("%", "%25").replace("\n", "%0A")
+              print("::error title=Test failure::" + text[:3000])' || true
+          fi
+          for report in $(ls -t ~/Library/Logs/DiagnosticReports/AndroidFileSync*.ips 2>/dev/null | head -n 2); do
+            python3 - "$report" <<'PY' || true
+          import json, sys
+          lines = open(sys.argv[1]).read().split("\n", 1)
+          body = json.loads(lines[1])
+          exc = body.get("exception", {})
+          out = ["Exception: %s %s" % (exc.get("type", ""), exc.get("signal", ""))]
+          term = body.get("termination", {}).get("indicator")
+          if term: out.append("Termination: " + term)
+          for t in body.get("threads", []):
+              if t.get("triggered"):
+                  images = body.get("usedImages", [])
+                  for fr in t.get("frames", [])[:25]:
+                      img = images[fr["imageIndex"]].get("name", "?") if fr.get("imageIndex") is not None and fr["imageIndex"] < len(images) else "?"
+                      out.append("%s  %s" % (img, fr.get("symbol", hex(fr.get("imageOffset", 0)))))
+          msg = "%0A".join(x.replace("%", "%25") for x in out)
+          print("::error title=Crash report " + sys.argv[1].split("/")[-1] + "::" + msg[:8000])
+          PY
+          done
           # The end of the log usually explains a failure the patterns missed.
           tail_text=$(tail -n 25 xcodebuild.log | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
           echo "::error title=Last lines of the xcodebuild log::${tail_text}"
