@@ -38,6 +38,12 @@ struct DiscoveredDevice: Identifiable, Equatable {
 /// Browses the local network for ADB pairing services via mDNS.
 /// Uses NWBrowser and NWConnection for real-time resolution (bypasses mDNSResponder cache).
 class ADBPairingBrowser: ObservableObject {
+    /// Explicitly nonisolated: with MainActor default isolation the implicit
+    /// deinit hops to the main actor through Swift's back-deployment shim
+    /// (deployment target < macOS 15.4), which crashes when the object is
+    /// released on the main thread. Covered by ObjectLifecycleTests.
+    nonisolated deinit {}
+
     @Published var status: AutoDiscoveryStatus = .idle
     /// Keyed by stable service name (e.g. "adb-XXXX") when available, otherwise by IP.
     @Published var discoveredDevices: [String: DiscoveredDevice] = [:]

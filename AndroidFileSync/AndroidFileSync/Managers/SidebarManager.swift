@@ -91,6 +91,12 @@ class SidebarManager: ObservableObject {
         load()
     }
 
+    /// Explicitly nonisolated: with MainActor default isolation the implicit
+    /// deinit hops to the main actor through Swift's back-deployment shim
+    /// (deployment target < macOS 15.4), which crashes when the object is
+    /// released on the main thread. Covered by ObjectLifecycleTests.
+    nonisolated deinit {}
+
     // MARK: - Existence Checking
 
     /// True while an existence check is running (rows show a spinner only then).
