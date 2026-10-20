@@ -4,12 +4,33 @@ This file records the changes in each release of [SSSherlocked/AndroidFileSync](
 
 Earlier history belongs to the original project: [Santosh7017/AndroidFileSync](https://github.com/Santosh7017/AndroidFileSync).
 
-# AndroidFileSync v2.3.7
+# AndroidFileSync v2.3.8
+
+## 📦 Download
+
+- **Downloads are now .zip files instead of .dmg**: unzip the file for your Mac (AppleSilicon or Intel) and drag **AndroidFileSync.app** into Applications.
 
 ## 👥 Multiple users
 
 - **Switch between Android users**: when the phone has more than one user (owner, app clone space, second space…), a user menu appears at the top of the sidebar. Choosing a user shows that user's storage; Quick Access's default folders, the Go menu and `~` in Go to Folder follow it. On connect, the phone's current user is selected.
 - **Every user is tested first**: some phones block other users' storage. Before a user can be chosen, the app checks that its folders can really be opened and whether files can be written. Blocked users are listed with the reason and can't be chosen; users whose files are blocked but whose media library is readable are marked "media library only" (not browsable yet).
+
+## 🖱 Drag and drop
+
+- **Text files can be dragged to Finder**: .txt, .log, .json and other text files used to be refused when dropped in Finder. They now download like any other file.
+
+## 📶 Wireless connection
+
+- **Fixed a possible crash when closing the WiFi window** on macOS versions before 15.4.
+
+## 📄 Opening files
+
+- **Double-click opens a file in its Mac app**, as in Finder: the file is downloaded to a temporary folder and opened with its default app. If no app on the Mac can open it, you're asked where to save it instead. File › Open (⌘↓) does the same; Space still shows the preview.
+- **Text files show their contents in the preview**: txt, log, md, json, csv and source code files show their text (the first 512 KB) instead of only an icon.
+
+---
+
+# AndroidFileSync v2.3.7
 
 ## 📌 Sidebar
 
@@ -20,17 +41,7 @@ Earlier history belongs to the original project: [Santosh7017/AndroidFileSync](h
 
 ## 🖱 Drag and drop
 
-- **Text files can be dragged to Finder**: .txt, .log, .json and other text files used to be refused when dropped in Finder. They now download like any other file.
 - **Starting a drag no longer stalls**: cleaning up old temporary files left by earlier drags now happens in the background instead of blocking the window.
-
-## 📶 Wireless connection
-
-- **Fixed a possible crash when closing the WiFi window** on macOS versions before 15.4.
-
-## 📄 Opening files
-
-- **Double-click opens a file in its Mac app**, as in Finder: the file is downloaded to a temporary folder and opened with its default app. If no app on the Mac can open it, you're asked where to save it instead. File › Open (⌘↓) does the same; Space still shows the preview.
-- **Text files show their contents in the preview**: txt, log, md, json, csv and source code files show their text (the first 512 KB) instead of only an icon.
 
 ---
 

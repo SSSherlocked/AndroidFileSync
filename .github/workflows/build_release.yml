@@ -161,7 +161,7 @@ jobs:
           fi
           lipo -info "$executable"
       # One universal app is built; Apple Silicon and Intel ship as separate,
-      # smaller packages thinned from it. ditto --arch drops the other slice
+      # smaller zips thinned from it. ditto --arch drops the other slice
       # from every Mach-O in the bundle (including adb), so each copy is
       # re-signed ad hoc afterwards.
       - name: Split macOS application by architecture
@@ -191,31 +191,36 @@ jobs:
             codesign --force --deep --sign - "$out/$NAME"
             codesign --verify --deep --strict "$out/$NAME"
             lipo -info "$out/$NAME/Contents/MacOS/$APP_NAME"
-            ln -s /Applications "$out/Applications"
-            hdiutil create \
-              -volname "$APP_NAME" \
-              -srcfolder "$out" \
-              -ov -format UDZO \
-              "$APP_NAME-${VERSION}-MacOS-$label.dmg"
+            # ditto keeps the bundle's symlinks, permissions and code signature,
+            # which a plain `zip` would not.
+            ditto -c -k --sequesterRsrc --keepParent \
+              "$out/$NAME" \
+              "$APP_NAME-${VERSION}-MacOS-$label.zip"
           done
+      # Unpack each zip and check the app inside still has a valid signature.
       - name: Verify macOS packages
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           for label in AppleSilicon Intel; do
-            dmg="$APP_NAME-${VERSION}-MacOS-$label.dmg"
-            test -f "$dmg"
-            hdiutil verify "$dmg"
-            ls -lh "$dmg"
+            zip="$APP_NAME-${VERSION}-MacOS-$label.zip"
+            test -f "$zip"
+            check="verify-$label"
+            rm -rf "$check"
+            mkdir -p "$check"
+            ditto -x -k "$zip" "$check"
+            codesign --verify --deep --strict "$check/$APP_NAME.app"
+            rm -rf "$check"
+            ls -lh "$zip"
           done
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: androidfilesync-macos
           path: |
-            AndroidFileSync-*-MacOS-AppleSilicon.dmg
-            AndroidFileSync-*-MacOS-Intel.dmg
+            AndroidFileSync-*-MacOS-AppleSilicon.zip
+            AndroidFileSync-*-MacOS-Intel.zip
           if-no-files-found: error
           retention-days: 3
   publish-release:
@@ -323,4 +328,4 @@ jobs:
           make_latest: ${{ !contains(needs.macos.outputs.version, '-') }}
           fail_on_unmatched_files: true
           files: |
-            artifacts/**/*.dmg
+            artifacts/**/*.zip
